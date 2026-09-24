@@ -79,10 +79,11 @@ export function App() {
           {options.line && (moduleId === 'intersection' || (moduleId === 'partial' && sceneId !== 'frank' && (sceneId !== 'extended' || progress > extendedDissociationStart))) && <span><i className="legend-dot blue" />位错线 L₂</span>}
           {options.plane && <span><i className="legend-dot pale" />滑移面</span>}
           {showsFaultPlane && <span><i className="legend-dot fault" />层错面</span>}
-          {moduleId === 'intersection' && progress > .45 && options.line && <span><i className="legend-dot intersection" />交割点</span>}
+          {moduleId === 'intersection' && progress >= .46 && progress <= .64 && options.line && <span><i className="legend-dot intersection" />交割点</span>}
           {(moduleId === 'motion' || moduleId === 'intersection') && options.trajectory && <span><i className={`legend-dot ${moduleId === 'intersection' ? 'intersection-traj' : 'motion'}`} />{moduleId === 'intersection' ? '两线接近轨迹' : '运动路径与方向'}</span>}
           {showsShearStress && <span><i className="legend-dot stress" />τ 外加切应力</span>}
           {showsSurfaceStep && <span><i className="legend-dot surface-step" />表面台阶/滑移分界</span>}
+          {sceneId === 'edge-glide' && progress > .9 && <span><i className="legend-dot surface-step" />晶体表面错台 ≈ b</span>}
         </div>
         <div className="stage-footnote">拖动旋转 · 滚轮缩放 · 中键/右键平移<span>模型为教学几何示意，非原子级物理仿真</span></div>
       </section>

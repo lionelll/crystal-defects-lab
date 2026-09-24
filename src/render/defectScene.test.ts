@@ -72,4 +72,20 @@ describe('animated render resource reuse', () => {
     expect(dynamic.children.filter(child => child.visible).length).toBe(withStep - 5);
     visual.dispose();
   });
+  it('shortens the climbing extra half-plane without raising its upper atom row', () => {
+    const visual = new DefectScene();
+    visual.update('edge-climb', 0, options);
+    const staticLayer = visual.scene.children.at(-2) as THREE.Group;
+    const extra = staticLayer.children.find(child => child instanceof THREE.InstancedMesh && child.count === 10) as THREE.InstancedMesh;
+    const startTop = new THREE.Matrix4();
+    extra.getMatrixAt(1, startTop);
+    visual.update('edge-climb', 1, options);
+    const endTop = new THREE.Matrix4();
+    const endBottom = new THREE.Matrix4();
+    extra.getMatrixAt(1, endTop);
+    extra.getMatrixAt(0, endBottom);
+    expect(new THREE.Vector3().setFromMatrixPosition(endTop).y).toBeCloseTo(new THREE.Vector3().setFromMatrixPosition(startTop).y);
+    expect(new THREE.Vector3().setFromMatrixScale(endBottom).x).toBeCloseTo(0);
+    visual.dispose();
+  });
 });

@@ -1,27 +1,58 @@
 import { describe, expect, it } from 'vitest';
-import { cubicAtomPosition, doubleCrossSlipParallelPlaneY, doubleCrossSlipPlaneX, doubleCrossSlipState, edgeState, extendedDissociationStart, extendedSpacingAdjustStart, fccAtomPosition, fccLatticePosition, fccNearestNeighbor, frankFaultAtomPosition, fullFccBurgersLocal, intersectionFrame, leadingShockleyLocal, partialSeparation, screwPitch, screwState, secondCrossSlipPlaneX, trailingShockleyLocal, vacancyLatticeIndex } from './sceneGeometry';
+import { cubicAtomPosition, cubicSpacing, doubleCrossSlipParallelPlaneY, doubleCrossSlipPlaneX, doubleCrossSlipState, edgeBurgers, edgeState, extendedDissociationStart, extendedSpacingAdjustStart, fccAtomPosition, fccLatticePosition, fccNearestNeighbor, frankFaultAtomPosition, fullFccBurgersLocal, intersectionFrame, leadingShockleyLocal, partialSeparation, screwBaseY, screwPitch, screwState, secondCrossSlipPlaneX, trailingShockleyLocal, vacancyPosition } from './sceneGeometry';
 
 describe('edge and screw displacement geometry', () => {
   it('keeps edge glide in its plane while climb leaves that plane', () => {
     expect(edgeState('edge-glide', 0).y).toBe(0);
     expect(edgeState('edge-glide', 1).y).toBe(0);
     expect(edgeState('edge-glide', 1).x).toBeGreaterThan(edgeState('edge-glide', 0).x);
-    expect(edgeState('edge-climb', 1).y).toBeCloseTo(1.15);
+    expect(edgeState('edge-climb', 1).y).toBeCloseTo(cubicSpacing);
+    expect(edgeState('edge-glide', 1).x).toBeGreaterThan(3 * cubicSpacing);
+    const bottom = cubicAtomPosition('edge-glide', 1, 0, -1, 0);
+    const top = cubicAtomPosition('edge-glide', 1, 0, 1, 0);
+    expect(bottom[0] - top[0]).toBeCloseTo(edgeBurgers);
   });
-  it('moves a vacancy through lattice sites before the climb', () => {
-    expect([0, .25, .5, .6, .66].map(vacancyLatticeIndex)).toEqual([-2, -1, 0, 0, null]);
+  it('moves the vacancy continuously through lattice sites before one-layer climb', () => {
+    expect(vacancyPosition(0)?.position[0]).toBeCloseTo(-2 * cubicSpacing);
+    expect(vacancyPosition(.2)!.position[0]).toBeGreaterThan(-2 * cubicSpacing);
+    expect(vacancyPosition(.2)!.position[0]).toBeLessThan(-cubicSpacing);
+    expect(vacancyPosition(.3)?.position[0]).toBeCloseTo(-cubicSpacing);
+    expect(vacancyPosition(.5)?.position[0]).toBeCloseTo(0);
+    expect(vacancyPosition(.66)).toBeNull();
     expect(edgeState('edge-climb', .5).y).toBe(0);
     expect(edgeState('edge-climb', .66).y).toBe(0);
     expect(edgeState('edge-climb', .8).y).toBeGreaterThan(0);
+    for (let step = 1; step < 660; step++) {
+      const before = vacancyPosition((step - 1) / 1000)!;
+      const after = vacancyPosition(step / 1000)!;
+      expect(Math.hypot(...before.position.map((value, axis) => value - after.position[axis]))).toBeLessThan(.025);
+    }
   });
   it('uses an angular screw displacement and a continuous cross-slip core path', () => {
+    expect(screwPitch).toBe(cubicSpacing);
     const above = cubicAtomPosition('screw', 0, 1, 1, 0)[2];
     const below = cubicAtomPosition('screw', 0, 1, -1, 0)[2];
-    expect(above - below).toBeCloseTo(screwPitch / 4, 8);
-    expect(screwState('cross-slip', .5).y).toBe(0);
+    expect(above - below).toBeGreaterThan(0);
+    expect(above - below).toBeLessThan(screwPitch / 2);
+    expect(screwState('cross-slip', .5).y).toBe(screwBaseY);
     expect(screwState('cross-slip', 1).x).toBeCloseTo(screwState('cross-slip', .5).x);
     expect(screwState('cross-slip', .5).x).toBeCloseTo(secondCrossSlipPlaneX);
     expect(screwState('cross-slip', 1).y).toBeGreaterThan(0);
+  });
+  it('has no visible row-wide atom jumps in glide, cross-slip, or climb', () => {
+    for (const id of ['screw-glide', 'cross-slip', 'edge-climb'] as const) {
+      let maximum = 0;
+      for (let step = 1; step <= 1000; step++) {
+        const p = step / 1000;
+        for (let k = -2; k <= 2; k++) for (let j = -2; j <= 2; j++) for (let i = -3; i <= 3; i++) {
+          if (id === 'edge-climb' && i === -2 && j === 1 && k === 0) continue;
+          const a = cubicAtomPosition(id, p - .001, i, j, k);
+          const b = cubicAtomPosition(id, p, i, j, k);
+          maximum = Math.max(maximum, Math.hypot(...a.map((value, axis) => value - b[axis])));
+        }
+      }
+      expect(maximum, id).toBeLessThan(.01);
+    }
   });
 });
 
@@ -94,16 +125,20 @@ describe('FCC partial separation', () => {
 describe('intersection and double cross-slip sequence', () => {
   it('starts separated, meets, then forms a local step', () => {
     const before = intersectionFrame('edge-screw', 0);
-    const meeting = intersectionFrame('edge-screw', .52);
+    const meeting = intersectionFrame('edge-screw', .48);
     const after = intersectionFrame('edge-screw', 1);
     expect(before.center1).not.toEqual(before.center2);
     expect(before.jog).toBe(0);
     meeting.center1.forEach(value => expect(value).toBeCloseTo(0));
     meeting.center2.forEach(value => expect(value).toBeCloseTo(0));
     expect(meeting.jog).toBe(0);
-    expect(after.jog).toBeGreaterThan(0);
+    expect(after.jog).toBeCloseTo(cubicSpacing);
+    expect(after.center1[0]).toBeGreaterThan(0);
+    expect(after.center2[0]).toBeLessThan(0);
+    const lineWithoutJog = after.config.l1.map((value, axis) => after.center1[axis] + .12 * value);
+    expect(Math.hypot(...after.line1[3].map((value, axis) => value - lineWithoutJog[axis]))).toBeCloseTo(cubicSpacing);
   });
-  it('shows both cross-slip transfers before the candidate loop', () => {
+  it('stops at the obstacle, transfers between planes, and bows a pinned segment into a loop', () => {
     const initial = doubleCrossSlipState(0);
     const first = doubleCrossSlipState(.45);
     const second = doubleCrossSlipState(.8);
@@ -114,22 +149,36 @@ describe('intersection and double cross-slip sequence', () => {
     expect(first.line[3][0]).toBeCloseTo(doubleCrossSlipPlaneX);
     expect(second.line[4][1]).toBeCloseTo(doubleCrossSlipParallelPlaneY);
     expect(second.line[4][0]).toBeGreaterThan(doubleCrossSlipPlaneX);
-    expect(initial.loopRadius).toBeNull();
-    expect(doubleCrossSlipState(.72).loopRadius).toBeNull();
-    expect(doubleCrossSlipState(.78).loopRadius).toBeNull();
-    expect(second.loopRadius).toBeNull();
+    for (let step = 0; step <= 62; step++) {
+      const state = doubleCrossSlipState(step / 100);
+      for (let index = 1; index < state.line.length; index++) {
+        const a = state.line[index - 1], b = state.line[index];
+        const segment = b.map((value, axis) => value - a[axis]);
+        const towardObstacle = [-.55 - a[0], -a[1], -a[2]];
+        const projection = Math.max(0, Math.min(1, segment.reduce((sum, value, axis) => sum + value * towardObstacle[axis], 0) / segment.reduce((sum, value) => sum + value * value, 0)));
+        const closest = a.map((value, axis) => value + projection * segment[axis]);
+        expect(Math.hypot(closest[0] + .55, closest[1], closest[2])).toBeGreaterThan(.29);
+      }
+    }
+    expect(initial.loopRadiusX).toBeNull();
+    expect(doubleCrossSlipState(.72).loopRadiusX).toBeNull();
+    expect(doubleCrossSlipState(.78).loopRadiusX).toBeNull();
+    expect(second.loopRadiusX).toBeNull();
     const closing = doubleCrossSlipState(.82);
     expect(closing.connectedArc).not.toBeNull();
-    closing.connectedArc![0].forEach((value, axis) => expect(value).toBeCloseTo(closing.line[6][axis]));
-    expect(closing.loopRadius).toBeNull();
+    closing.connectedArc![0].forEach((value, axis) => expect(value).toBeCloseTo(closing.line[3][axis]));
+    closing.connectedArc!.at(-1)!.forEach((value, axis) => expect(value).toBeCloseTo(closing.line[6][axis]));
+    expect(closing.line[4][0]).toBeGreaterThan(closing.line[3][0]);
+    expect(closing.connectedArc![16][0]).toBeLessThan(closing.line[3][0]);
+    expect(closing.loopRadiusX).toBeNull();
     const connected = doubleCrossSlipState(.86);
     const detached = doubleCrossSlipState(.86001);
-    expect(connected.connectedArc!.at(-1)![0]).toBeCloseTo(connected.connectedArc![0][0]);
-    expect(connected.connectedArc!.at(-1)![2]).toBeCloseTo(connected.connectedArc![0][2]);
-    expect(detached.connectedArc).toBeNull();
-    expect(detached.loopRadius).toBeCloseTo(.55);
-    expect(detached.loopCenter[0] - .55).toBeCloseTo(connected.line[6][0]);
-    expect(doubleCrossSlipState(1).loopRadius).toBeGreaterThan(detached.loopRadius!);
+    expect(connected.connectedArc).not.toBeNull();
+    expect(detached.connectedArc).not.toBeNull();
+    expect(detached.loopRadiusX).toBeCloseTo(1.075);
+    expect(detached.loopOpacity).toBeLessThan(.001);
+    expect(doubleCrossSlipState(1).connectedArc).toBeNull();
+    expect(doubleCrossSlipState(1).loopRadiusX).toBeGreaterThan(detached.loopRadiusX!);
   });
   it('keeps the candidate source segments on the fixed A, B, or parallel C planes', () => {
     const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;

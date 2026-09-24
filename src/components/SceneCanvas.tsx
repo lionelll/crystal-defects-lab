@@ -17,7 +17,18 @@ export const SceneCanvas = memo(forwardRef<SceneCanvasHandle, Props>(function Sc
   const props = useRef({ id, progressRef, playing, options, autoRotate, spacing });
   const [error, setError] = useState(false);
 
-  useImperativeHandle(ref, () => ({ resetView() { model.current?.resetCamera(); if (orbit.current) orbit.current.autoRotate = false; orbit.current?.target.set(0, 0, 0); orbit.current?.update(); requestRender.current(); } }), []);
+  useImperativeHandle(ref, () => ({ resetView() {
+    model.current?.resetCamera();
+    if (orbit.current) {
+      const damping = orbit.current.enableDamping;
+      orbit.current.enableDamping = false;
+      orbit.current.autoRotate = false;
+      orbit.current.target.set(0, 0, 0);
+      orbit.current.update();
+      orbit.current.enableDamping = damping;
+    }
+    requestRender.current();
+  } }), []);
 
   useEffect(() => { props.current = { id, progressRef, playing, options, autoRotate, spacing }; requestRender.current(); }, [id, progress, progressRef, playing, options, autoRotate, spacing]);
 
@@ -50,8 +61,16 @@ export const SceneCanvas = memo(forwardRef<SceneCanvasHandle, Props>(function Sc
     const scheduler = createRenderScheduler(() => {
       const current = props.current;
       const nextProgress = current.progressRef.current;
-      if (current.id !== lastModelId || nextProgress !== lastModelProgress || current.options !== lastModelOptions || current.spacing !== lastModelSpacing) {
+      const sceneChanged = current.id !== lastModelId;
+      if (sceneChanged || nextProgress !== lastModelProgress || current.options !== lastModelOptions || current.spacing !== lastModelSpacing) {
         visual.update(current.id, nextProgress, current.options, current.spacing);
+        if (sceneChanged) {
+          const damping = controls.enableDamping;
+          controls.enableDamping = false;
+          controls.target.set(0, 0, 0);
+          controls.update();
+          controls.enableDamping = damping;
+        }
         lastModelId = current.id;
         lastModelProgress = nextProgress;
         lastModelOptions = current.options;
@@ -65,6 +84,7 @@ export const SceneCanvas = memo(forwardRef<SceneCanvasHandle, Props>(function Sc
     });
     const schedule = scheduler.schedule;
     controls.addEventListener('change', schedule);
+    renderer.domElement.addEventListener('webglcontextrestored', schedule);
     const resize = () => {
       const rect = element.getBoundingClientRect();
       renderer.setSize(Math.max(1, rect.width), Math.max(1, rect.height), false);
@@ -82,6 +102,7 @@ export const SceneCanvas = memo(forwardRef<SceneCanvasHandle, Props>(function Sc
       scheduler.stop();
       observer.disconnect();
       controls.removeEventListener('change', schedule);
+      renderer.domElement.removeEventListener('webglcontextrestored', schedule);
       controls.dispose();
       visual.dispose();
       renderer.dispose();

@@ -19,6 +19,11 @@ describe('PRD first-edition scene coverage', () => {
     const doubleSlip = scenes.find(scene => scene.id === 'double-cross-slip')!;
     expect(stageAt(doubleSlip, .75)).toBe('第二次交滑移');
     expect(stageAt(doubleSlip, .8)).toBe('环形成');
+    const intersection = scenes.find(scene => scene.id === 'edge-screw')!;
+    expect(stageAt(intersection, .03)).toBe('交割前');
+    expect(stageAt(intersection, .04)).toBe('相向运动');
+    expect(stageAt(intersection, .48)).toBe('发生交割');
+    expect(stageAt(intersection, .58)).toBe('交割后');
   });
   it('steps to physical stage boundaries rather than arbitrary percentages', () => {
     const source = scenes.find(scene => scene.id === 'frank-read')!;
@@ -115,12 +120,17 @@ describe('Frank–Read source topology', () => {
   it('starts detached loops at the contact curve and fades them in as the source recovers', () => {
     const contact = frankReadState(.385);
     const later = frankReadState(.5);
-    expect(contact.source[4][1]).toBeCloseTo(2.95);
-    expect(contact.loops[0].center[1] + contact.loops[0].radius).toBeCloseTo(2.95);
+    expect(contact.source[4][1]).toBeCloseTo(2.55);
+    expect(contact.loops[0].center[1] + contact.loops[0].radiusY).toBeCloseTo(2.55);
+    for (const pinX of [-2, 2]) {
+      const loop = contact.loops[0];
+      const ellipse = (pinX / loop.radiusX) ** 2 + (loop.center[1] / loop.radiusY) ** 2;
+      expect(ellipse).toBeLessThan(1);
+    }
     expect(contact.loops[0].opacity).toBe(0);
     expect(later.loops[0].opacity).toBeGreaterThan(.9);
     expect(Math.abs(later.source[4][1])).toBeLessThan(.5);
-    expect(later.loops[0].center[1] + later.loops[0].radius).toBeLessThan(3.2);
+    expect(later.loops[0].center[1] + later.loops[0].radiusY).toBeLessThan(3.2);
     for (const p of [.4, .9, 1.4]) {
       expect(frankReadState(p).source.every(point => point[2] === 0)).toBe(true);
       expect(frankReadState(p).loops.every(loop => loop.center[2] === 0)).toBe(true);
@@ -133,7 +143,7 @@ describe('Frank–Read source topology', () => {
     expect(frankReadLoopCount(1.9)).toBe(4);
     expect(before.loops).toHaveLength(2);
     expect(after.loops).toHaveLength(2);
-    expect(after.loops[0].radius - before.loops[0].radius).toBeLessThan(.01);
+    expect(after.loops[0].radiusX - before.loops[0].radiusX).toBeLessThan(.01);
     expect(after.source[0]).toEqual(before.source[0]);
     expect(frankReadState(1.4).loops).toHaveLength(3);
   });

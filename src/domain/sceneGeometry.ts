@@ -2,9 +2,12 @@ import type { SceneId } from '../data/scenes';
 import { add, intersectionConfig, scale, type IntersectionId, type Vec3 } from './geometry';
 
 export const edgeCoreOffset = .38;
-export const screwPitch = .9;
+export const cubicSpacing = .75;
+export const edgeBurgers = cubicSpacing;
+export const screwPitch = cubicSpacing;
+export const screwBaseY = -.3;
 export const secondCrossSlipPlaneX = 1.25;
-export const doubleCrossSlipPlaneX = .4;
+export const doubleCrossSlipPlaneX = -.9;
 export const doubleCrossSlipParallelPlaneY = 1.1;
 export const extendedDissociationStart = .25;
 export const extendedSpacingAdjustStart = .5;
@@ -23,8 +26,8 @@ export function smoothRange(progress: number, start: number, end: number) {
 export function edgeState(id: SceneId, progress: number) {
   const p = clamp(progress);
   return {
-    x: (id === 'edge-glide' ? -1.45 + 2.9 * p : 0) + edgeCoreOffset,
-    y: id === 'edge-climb' ? 1.15 * smoothRange(p, .66, 1) : 0,
+    x: id === 'edge-glide' ? -2.1 + 4.65 * p : edgeCoreOffset,
+    y: id === 'edge-climb' ? cubicSpacing * smoothRange(p, .66, 1) : 0,
   };
 }
 
@@ -32,15 +35,27 @@ export function screwState(id: SceneId, progress: number) {
   const p = clamp(progress);
   return {
     x: id === 'screw-glide' ? -1.25 + 2.5 * p : id === 'cross-slip' ? secondCrossSlipPlaneX * smoothRange(p, 0, .5) : 0,
-    y: id === 'cross-slip' ? 1.1 * smoothRange(p, .5, 1) : 0,
+    y: screwBaseY + (id === 'cross-slip' ? 1.1 * smoothRange(p, .5, 1) : 0),
   };
 }
 
-export function vacancyLatticeIndex(progress: number): number | null {
-  if (progress < .2) return -2;
-  if (progress < .4) return -1;
-  if (progress < .66) return 0;
-  return null;
+export function vacancyPosition(progress: number): { position: Vec3; radius: number } | null {
+  const p = clamp(progress);
+  if (p >= .66) return null;
+  const x = -2 * cubicSpacing + cubicSpacing * smoothRange(p, .1, .3) + cubicSpacing * smoothRange(p, .3, .5);
+  const absorption = smoothRange(p, .5, .66);
+  const core = edgeState('edge-climb', p);
+  return {
+    position: [x + (core.x - x) * absorption, cubicSpacing + (.48 + core.y - cubicSpacing) * absorption, 0],
+    radius: .16 * (1 - absorption),
+  };
+}
+
+function screwAngle(x: number, y: number, coreX: number, coreY: number) {
+  const angle = Math.atan2(y - coreY, x - coreX);
+  // A material point must stay on the same angular branch while the core
+  // crosses its row during cross-slip; the swept area retains the full-b step.
+  return y >= screwBaseY && y < coreY && x < coreX ? angle + 2 * Math.PI : angle;
 }
 
 export function cubicAtomPosition(id: SceneId, progress: number, i: number, j: number, k: number): Vec3 {
@@ -50,13 +65,23 @@ export function cubicAtomPosition(id: SceneId, progress: number, i: number, j: n
   let z = k * .75;
   if (id === 'edge' || id === 'edge-glide' || id === 'edge-climb') {
     const core = edgeState(id, p);
-    const above = y > core.y + .1;
-    x += above ? -.12 * Math.tanh((x - core.x) * 1.4) : 0;
-    if (id === 'edge-glide' && y < core.y) x += .43 * smoothRange(core.x - x, -.28, .28);
-    y += above ? .06 * Math.exp(-Math.abs(x - core.x)) : -.025 * Math.exp(-Math.abs(x - core.x));
+    const above = id === 'edge-climb' ? smoothRange(y - core.y, -.3, .3) : Number(y > core.y + .1);
+    const elastic = id === 'edge-glide' ? 1 - smoothRange(p, .8, 1) : 1;
+    x -= .12 * above * Math.tanh((x - core.x) * 1.4) * elastic;
+    if (id === 'edge-glide' && y < core.y) x += edgeBurgers * smoothRange(core.x - x, -.28, .28);
+    y += (.06 * above - .025 * (1 - above)) * Math.exp(-Math.abs(x - core.x));
+    if (id === 'edge-climb' && j === 1 && k === 0) {
+      if (i === -1) x -= cubicSpacing * smoothRange(p, .1, .3);
+      if (i === 0) x -= cubicSpacing * smoothRange(p, .3, .5);
+      if (i === -2) {
+        const transfer = smoothRange(p, .5, .85);
+        x = core.x * (1 - transfer);
+        y = (.48 + core.y) * (1 - transfer) + cubicSpacing * transfer;
+      }
+    }
   } else if (id === 'screw' || id === 'screw-glide' || id === 'cross-slip') {
     const core = screwState(id, p);
-    z += screwPitch * Math.atan2(y - core.y, x - core.x) / (2 * Math.PI);
+    z += screwPitch * screwAngle(x, y, core.x, core.y) / (2 * Math.PI);
   }
   return [x, y, z];
 }
@@ -121,8 +146,8 @@ function jogLine(center: Vec3, line: Vec3, offset: Vec3, jog: number): Vec3[] {
 
 export function intersectionFrame(id: IntersectionId, progress: number) {
   const config = intersectionConfig(id);
-  const approach = 1 - smoothRange(progress, .04, .52);
-  const jog = .75 * smoothRange(progress, .56, .92);
+  const approach = 1 - 2 * smoothRange(progress, .04, .92);
+  const jog = cubicSpacing * smoothRange(progress, .48, .58);
   const center1 = scale(config.from1, approach);
   const center2 = scale(config.from2, approach);
   return { config, center1, center2, jog, line1: jogLine(center1, config.l1, config.b2, jog), line2: jogLine(center2, config.l2, config.b1, jog) };
@@ -131,27 +156,30 @@ export function intersectionFrame(id: IntersectionId, progress: number) {
 export function doubleCrossSlipState(progress: number) {
   const approach = smoothRange(progress, .12, .44);
   const firstTransfer = smoothRange(progress, .44, .62);
-  const secondTransfer = smoothRange(progress, .62, .78);
-  const targetX = [-1.6, -.9, .4, .4, .4, .4, .4, .4, -.9, -1.6];
+  const bow = smoothRange(progress, .62, .86);
+  const recovery = 1 - smoothRange(progress, .86, .96);
+  const targetX = [-1.6, -.9, -.9, -.9, -.9, -.9, -.9, -.9, -.9, -1.6];
   const z = [-2, -1.25, -.85, -.55, -.2, .2, .55, .85, 1.25, 2];
   const line = targetX.map((x, index): Vec3 => [
-    -1.6 + (x + 1.6) * approach + (index === 4 || index === 5 ? .8 * secondTransfer : 0),
+    -1.6 + (x + 1.6) * approach + (index === 4 || index === 5 ? 1.7 * bow * recovery : 0),
     index >= 3 && index <= 6 ? doubleCrossSlipParallelPlaneY * firstTransfer : 0,
     z[index],
   ]);
-  const closure = smoothRange(progress, .78, .86);
-  const arcSteps = Math.max(2, Math.ceil(64 * closure) + 1);
-  const connectedArc: Vec3[] | null = closure > 0 && progress <= .86
-    ? Array.from({ length: arcSteps }, (_, index): Vec3 => {
-      const theta = Math.PI + 2 * Math.PI * closure * index / (arcSteps - 1);
-      return [.95 + .55 * Math.cos(theta), doubleCrossSlipParallelPlaneY, .55 + .55 * Math.sin(theta)];
+  const connectedArc: Vec3[] | null = progress >= .62 && progress < .92
+    ? Array.from({ length: 33 }, (_, index): Vec3 => {
+      const t = index / 32;
+      return [doubleCrossSlipPlaneX - .45 * bow * Math.sin(Math.PI * t), doubleCrossSlipParallelPlaneY, -.55 + 1.1 * t];
     })
     : null;
+  const connectedArcOpacity = 1 - smoothRange(progress, .86, .92);
   const detached = smoothRange(progress, .86, 1);
   return {
     line,
     connectedArc,
-    loopRadius: progress > .86 ? .55 + .7 * detached : null,
-    loopCenter: [.95 + .9 * detached, doubleCrossSlipParallelPlaneY, .55] as Vec3,
+    connectedArcOpacity,
+    loopRadiusX: progress > .86 ? 1.075 + .3 * detached : null,
+    loopRadiusZ: progress > .86 ? .6 + .2 * detached : null,
+    loopOpacity: smoothRange(progress, .86, .92),
+    loopCenter: [-.275 + .4 * detached, doubleCrossSlipParallelPlaneY, 0] as Vec3,
   };
 }

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { SceneId } from '../data/scenes';
 import { frankReadState, type IntersectionId, type Vec3 } from '../domain/geometry';
 import type { DisplayOptions } from '../domain/modelTypes';
-import { cubicAtomPosition, doubleCrossSlipParallelPlaneY, doubleCrossSlipPlaneX, doubleCrossSlipState, edgeState, extendedDissociationStart, fccAtomPosition, frankFaultAtomPosition, fullFccBurgersLocal, intersectionFrame, leadingShockleyLocal, partialSeparation, screwPitch, screwState, secondCrossSlipPlaneX, smoothRange, trailingShockleyLocal, vacancyLatticeIndex } from '../domain/sceneGeometry';
+import { cubicAtomPosition, doubleCrossSlipParallelPlaneY, doubleCrossSlipPlaneX, doubleCrossSlipState, edgeBurgers, edgeState, extendedDissociationStart, fccAtomPosition, frankFaultAtomPosition, fullFccBurgersLocal, intersectionFrame, leadingShockleyLocal, partialSeparation, screwBaseY, screwPitch, screwState, secondCrossSlipPlaneX, smoothRange, trailingShockleyLocal, vacancyPosition } from '../domain/sceneGeometry';
 
 const ink = 0x173252;
 const atomBlue = 0x5a9bd1;
@@ -101,6 +101,16 @@ function addLoop(group: THREE.Group, center: THREE.Vector3, radius: number, colo
     const s = Math.sin(a) * radius;
     points.push(plane === 'xy' ? V(center.x + c, center.y + s, center.z) : plane === 'xz' ? V(center.x + c, center.y, center.z + s) : V(center.x, center.y + c, center.z + s));
   }
+  addLine(group, points, color, .055, opacity);
+}
+
+function addEllipseLoop(group: THREE.Group, center: THREE.Vector3, radiusX: number, radiusY: number, color: number, opacity = 1, plane: 'xy' | 'xz' = 'xy') {
+  const points = Array.from({ length: 65 }, (_, index) => {
+    const angle = 2 * Math.PI * index / 64;
+    return plane === 'xy'
+      ? V(center.x + radiusX * Math.cos(angle), center.y + radiusY * Math.sin(angle), center.z)
+      : V(center.x + radiusX * Math.cos(angle), center.y, center.z + radiusY * Math.sin(angle));
+  });
   addLine(group, points, color, .055, opacity);
 }
 
@@ -296,7 +306,16 @@ export class DefectScene {
     this.resetCamera();
   }
 
-  resetCamera() { this.camera.position.set(6.7, 5.2, 7.2); this.camera.lookAt(0, 0, 0); }
+  resetCamera() {
+    const id = this.id;
+    if (id === 'edge' || id === 'edge-glide' || id === 'edge-climb') this.camera.position.set(.8, 1.7, 9.4);
+    else if (id === 'screw' || id === 'screw-glide' || id === 'cross-slip') this.camera.position.set(1.1, 2.2, 9.2);
+    else if (id === 'frank-read') this.camera.position.set(0, .25, 10.5);
+    else if (id === 'double-cross-slip') this.camera.position.set(1.5, 8.5, 3.2);
+    else if (id === 'extended' || id === 'shockley' || id === 'frank') this.camera.position.set(1.2, 8.1, 3.4);
+    else this.camera.position.set(6.7, 5.2, 7.2);
+    this.camera.lookAt(0, 0, 0);
+  }
 
   setScene(id: SceneId, settings: DisplayOptions) {
     const previous = this.settings;
@@ -308,13 +327,15 @@ export class DefectScene {
       this.latticeObjects = [];
     }
     this.id = id;
+    if (sceneChanged) this.resetCamera();
     const partial = ['extended', 'shockley', 'frank'].includes(id);
     if (sceneChanged || settings.atoms !== previous.atoms) {
       if (this.atoms) { this.staticLayer.remove(this.atoms); disposeObject(this.atoms); this.atoms = null; }
       if (settings.atoms) {
         const count = partial ? 5 * 7 * 7 : 7 * 5 * 5;
         const geometry = new THREE.SphereGeometry(partial ? .092 : .095, 10, 8);
-        const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .35, metalness: .08, transparent: true, opacity: ['frank-read', 'double-cross-slip'].includes(id) ? .28 : id.includes('edge-') && id.includes('perpendicular') ? .46 : .87 });
+        const sourceScene = id === 'frank-read' || id === 'double-cross-slip';
+        const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .35, metalness: .08, transparent: true, depthWrite: !sourceScene, opacity: sourceScene ? .28 : id.includes('edge-') && id.includes('perpendicular') ? .46 : .87 });
         this.atoms = new THREE.InstancedMesh(geometry, material, count);
         this.atoms.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
         this.staticLayer.add(this.atoms);
@@ -379,8 +400,7 @@ export class DefectScene {
         for (let k = -2; k <= 2; k++) for (let j = -2; j <= 2; j++) for (let i = -3; i <= 3; i++) {
           const [x, y, z] = cubicAtomPosition(id, p, i, j, k);
           temp.position.set(x, y, z);
-          const vacancyI = vacancyLatticeIndex(p);
-          temp.scale.setScalar(id === 'edge-climb' && j === 1 && k === 0 && i === vacancyI ? 0 : 1);
+          temp.scale.setScalar(id === 'edge-climb' && j === 1 && k === 0 && i === -2 ? smoothRange(p, .5, .85) : 1);
           temp.updateMatrix(); atoms.setMatrixAt(index, temp.matrix);
           atoms.setColorAt(index, edge && j > 0 && Math.abs(i) < 2 ? atomEdgeHighlightColor : screw && y > 0 && x > core.x ? atomScrewHighlightColor : atomDefaultColor);
           index++;
@@ -391,7 +411,10 @@ export class DefectScene {
     }
     if (this.extra) {
       for (let k = 0; k < 5; k++) for (let j = 0; j < 2; j++) {
-        temp.position.set(core.x, .48 + j * .74 + core.y, (k - 2) * .75); temp.scale.setScalar(1); temp.updateMatrix(); this.extra.setMatrixAt(k * 2 + j, temp.matrix);
+        const climbing = id === 'edge-climb';
+        temp.position.set(core.x, .48 + j * .74 + (climbing ? 0 : core.y), (k - 2) * .75);
+        temp.scale.setScalar(climbing && j === 0 ? 1 - smoothRange(p, .66, 1) : 1);
+        temp.updateMatrix(); this.extra.setMatrixAt(k * 2 + j, temp.matrix);
       }
       this.extra.instanceMatrix.needsUpdate = true;
     }
@@ -403,22 +426,26 @@ export class DefectScene {
       addPlane(this.dynamicLayer, V(0, 0, 0), V(0, 1, 0), 5.4, 3.7);
     }
     if (s.extraHalfPlane) {
-      addPlane(this.dynamicLayer, V(x, 1.05 + y, 0), V(1, 0, 0), 3.6, 2.15, 0xf19b73, .12);
+      addPlane(this.dynamicLayer, V(x, 1.05 + (id === 'edge-climb' ? y / 2 : y), 0), V(1, 0, 0), 3.6, 2.15 - (id === 'edge-climb' ? y : 0), 0xf19b73, .12);
     }
     if (s.line) addLine(this.dynamicLayer, [V(x, y, -1.9), V(x, y, 1.9)], lineOrange, .077);
-    if (s.burgers) { addArrow(this.dynamicLayer, V(x + .15, y + .13, 1.93), V(.85, 0, 0), lineBlue); addArrow(this.dynamicLayer, V(x - .2, y, -2.12), V(0, 0, 1), ink, .85); }
+    if (s.burgers) { addArrow(this.dynamicLayer, V(x + .15, y + .13, 1.93), V(edgeBurgers, 0, 0), lineBlue); addArrow(this.dynamicLayer, V(x - .2, y, -2.12), V(0, 0, 1), ink, .85); }
     if (id === 'edge-glide' && s.stress) {
       addShearArrow(this.dynamicLayer, V(-1.95, 1.7, -2.1), V(.68, 0, 0));
       addShearArrow(this.dynamicLayer, V(1.95, -1.7, -2.1), V(-.68, 0, 0));
     }
-    if (id === 'edge-climb') {
-      const site = vacancyLatticeIndex(p);
-      if (site !== null) {
-        const absorption = range(p, .52, .66);
-        const vac = V(site * .75, .75, 0).lerp(V(x, .48 + y, 0), absorption);
-        const radius = .16 * (1 - absorption);
-        if (radius > .005) addLoop(this.dynamicLayer, vac, radius, 0xe59a45, 'xy', .9);
+    if (id === 'edge-glide') {
+      const slip = edgeBurgers * range(x - 2.25, -.28, .28);
+      if (slip > .02) {
+        const markerHeight = .48 * range(slip, 0, .2);
+        addLine(this.dynamicLayer, [V(2.25, 0, 2.18), V(2.25 + slip, 0, 2.18)], surfaceStepGold, .045);
+        addLine(this.dynamicLayer, [V(2.25, 0, 2.18), V(2.25, markerHeight, 2.18)], surfaceStepGold, .027);
+        addLine(this.dynamicLayer, [V(2.25 + slip, 0, 2.18), V(2.25 + slip, -markerHeight, 2.18)], surfaceStepGold, .027);
       }
+    }
+    if (id === 'edge-climb') {
+      const vacancy = vacancyPosition(p);
+      if (vacancy && vacancy.radius > .005) addLoop(this.dynamicLayer, fromTuple(vacancy.position), vacancy.radius, 0xe59a45, 'xy', .9);
       if (p >= .52 && p < .72) addSphere(this.dynamicLayer, V(x, .48 + y, 0), .1 + .07 * Math.sin(Math.PI * range(p, .52, .72)), 0xffd47e, .65);
     }
     if (s.trajectory && id === 'edge-glide') {
@@ -435,7 +462,7 @@ export class DefectScene {
     const { x, y } = screwState(id, p);
     if (s.plane) {
       if (id === 'screw') addHelicoid(this.dynamicLayer, x, y, -.65, screwPitch);
-      else addPlane(this.dynamicLayer, V(0, 0, 0), V(0, 1, 0), 5.2, 3.8, planeBlue, .13);
+      else addPlane(this.dynamicLayer, V(0, screwBaseY, 0), V(0, 1, 0), 5.2, 3.8, planeBlue, .13);
       if (id === 'cross-slip') addPlane(this.dynamicLayer, V(secondCrossSlipPlaneX, 0, 0), V(1, 0, 0), 3.8, 3.2, 0x7ec3a8, .13);
     }
     if ((id === 'screw' || id === 'screw-glide') && s.surfaceStep) {
@@ -452,13 +479,13 @@ export class DefectScene {
       addShearArrow(this.dynamicLayer, V(2.1, -1.7, .95), V(0, 0, -.7));
     }
     if (s.trajectory && id === 'screw-glide') {
-      addLine(this.dynamicLayer, [V(-1.25, 0, -2.18), V(1.25, 0, -2.18)], motionGuide, .026, .95);
-      addArrow(this.dynamicLayer, V(.9, 0, -2.18), V(.38, 0, 0), motionGuide, .75);
+      addLine(this.dynamicLayer, [V(-1.25, screwBaseY, -2.18), V(1.25, screwBaseY, -2.18)], motionGuide, .026, .95);
+      addArrow(this.dynamicLayer, V(.9, screwBaseY, -2.18), V(.38, 0, 0), motionGuide, .75);
     }
     if (s.trajectory && id === 'cross-slip') {
-      addLine(this.dynamicLayer, [V(0, 0, -2.18), V(secondCrossSlipPlaneX, 0, -2.18), V(secondCrossSlipPlaneX, 1.1, -2.18)], motionGuide, .026, .95);
-      addArrow(this.dynamicLayer, V(.85, 0, -2.18), V(.38, 0, 0), motionGuide, .75);
-      addArrow(this.dynamicLayer, V(secondCrossSlipPlaneX, .73, -2.18), V(0, .38, 0), motionGuide, .75);
+      addLine(this.dynamicLayer, [V(0, screwBaseY, -2.18), V(secondCrossSlipPlaneX, screwBaseY, -2.18), V(secondCrossSlipPlaneX, screwBaseY + 1.1, -2.18)], motionGuide, .026, .95);
+      addArrow(this.dynamicLayer, V(.85, screwBaseY, -2.18), V(.38, 0, 0), motionGuide, .75);
+      addArrow(this.dynamicLayer, V(secondCrossSlipPlaneX, screwBaseY + .73, -2.18), V(0, .38, 0), motionGuide, .75);
     }
   }
 
@@ -469,7 +496,7 @@ export class DefectScene {
     if (s.line) {
       const state = frankReadState(p);
       addLine(this.dynamicLayer, state.source.map(fromTuple), lineOrange, .07);
-      state.loops.forEach((loop, index) => addLoop(this.dynamicLayer, fromTuple(loop.center), loop.radius, index === 0 ? 0xe9a047 : 0xf1bb65, 'xy', loop.opacity));
+      state.loops.forEach((loop, index) => addEllipseLoop(this.dynamicLayer, fromTuple(loop.center), loop.radiusX, loop.radiusY, index === 0 ? 0xe9a047 : 0xf1bb65, loop.opacity));
     }
     if (s.burgers) addArrow(this.dynamicLayer, V(-2.35, -.42, 0), V(0, .95, 0), lineBlue);
     if (s.stress) {
@@ -487,8 +514,8 @@ export class DefectScene {
     addSphere(this.dynamicLayer, V(-.55, 0, 0), .22, 0x7a8799);
     const state = doubleCrossSlipState(p);
     if (s.line) addSegmentedLine(this.dynamicLayer, state.line.map(fromTuple), lineOrange, .07);
-    if (s.line && state.connectedArc) addLine(this.dynamicLayer, state.connectedArc.map(fromTuple), lineOrange, .055);
-    if (s.line && state.loopRadius !== null) addLoop(this.dynamicLayer, fromTuple(state.loopCenter), state.loopRadius, lineOrange, 'xz');
+    if (s.line && state.connectedArc) addLine(this.dynamicLayer, state.connectedArc.map(fromTuple), lineOrange, .055, state.connectedArcOpacity);
+    if (s.line && state.loopRadiusX !== null && state.loopRadiusZ !== null) addEllipseLoop(this.dynamicLayer, fromTuple(state.loopCenter), state.loopRadiusX, state.loopRadiusZ, lineOrange, state.loopOpacity, 'xz');
     if (s.burgers) addArrow(this.dynamicLayer, V(-1.8, .3, -1.8), V(0, 0, 1), lineBlue);
   }
 
@@ -502,7 +529,7 @@ export class DefectScene {
     if (s.plane) { addPlane(this.dynamicLayer, center1, normal1, 4.9, 4.4, planeBlue, .11); addPlane(this.dynamicLayer, center2, normal2, 4.9, 4.4, 0x8bbf9f, .1); }
     if (s.line) { addLine(this.dynamicLayer, frame.line1.map(fromTuple), lineOrange, .072); addLine(this.dynamicLayer, frame.line2.map(fromTuple), lineBlue, .072); }
     if (s.burgers) { addArrow(this.dynamicLayer, center1.clone().add(V(0, 0, 1.35)), fromTuple(config.b1), lineOrange, .72); addArrow(this.dynamicLayer, center2.clone().add(V(0, 0, -1.35)), fromTuple(config.b2), lineBlue, .72); }
-    if (p > .45 && s.line) addSphere(this.dynamicLayer, V(0, 0, 0), .11 + .08 * range(p, .45, .7), 0xf6bf6d, .8);
+    if (p >= .46 && p <= .64 && s.line) addSphere(this.dynamicLayer, V(0, 0, 0), .11 + .08 * range(p, .46, .58), 0xf6bf6d, .8);
     if (s.trajectory) { addLine(this.dynamicLayer, [fromTuple(config.from1), V(0, 0, 0)], 0xd19884, .015, .55); addLine(this.dynamicLayer, [fromTuple(config.from2), V(0, 0, 0)], 0x9fbbdd, .015, .55); }
   }
 

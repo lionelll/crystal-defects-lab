@@ -37,7 +37,7 @@ function lerp(a: Vec3, b: Vec3, t: number): Vec3 { return [a[0] + (b[0] - a[0]) 
 
 export interface FrankReadState {
   source: Vec3[];
-  loops: { center: Vec3; radius: number; opacity: number }[];
+  loops: { center: Vec3; radiusX: number; radiusY: number; opacity: number }[];
   inContact: boolean;
   generation: number;
   emittedLoopCount: number;
@@ -60,7 +60,7 @@ export function frankReadState(progress: number): FrankReadState {
   const generation = cycles * 2 + (p < .55 ? 1 : 2);
   const bow = range(phase, 0, .48);
   const fold = range(phase, .48, .7);
-  const loopShape: Vec3[] = [[-2, 0, 0], [-1.3, 0, 0], [0, -.18, 0], [-1.55, 1.38, 0], [0, 2.95, 0], [1.55, 1.38, 0], [0, -.18, 0], [1.3, 0, 0], [2, 0, 0]];
+  const loopShape: Vec3[] = [[-2, 0, 0], [-2.18, .35, 0], [-2.35, 1.25, 0], [-1.35, 2.12, 0], [0, 2.55, 0], [1.35, 2.12, 0], [2.35, 1.25, 0], [0, -.75, 0], [2, 0, 0]];
   const source = loopShape.map((target, i) => {
     const u = i / (loopShape.length - 1);
     const straight: Vec3 = [-2 + 4 * u, 0, 0];
@@ -77,8 +77,9 @@ export function frankReadState(progress: number): FrankReadState {
       const separation = range(age, 0, .16);
       const opacity = range(age, 0, .10) * (1 - range(age, 1.8, 2.3));
       loops.push({
-        center: [0, 1.385 + (index === 0 ? .03 : .05) * separation, 0],
-        radius: 1.565 + (index === 0 ? .18 : .1) * separation + .27 * Math.max(0, age - .16),
+        center: [0, .75 + (index === 0 ? .03 : .05) * separation, 0],
+        radiusX: 2.45 + .16 * separation + .25 * Math.max(0, age - .16),
+        radiusY: 1.8 + .12 * separation + .2 * Math.max(0, age - .16),
         opacity,
       });
     }
