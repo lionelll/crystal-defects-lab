@@ -6,7 +6,7 @@ import type { DisplayOptions } from './domain/modelTypes';
 import { frankReadLoopCount, intersectionConfig, type IntersectionId } from './domain/geometry';
 import { useLabController } from './app/useLabController';
 import { ArrowCounterClockwise, ArrowsClockwise, Pause, Play } from '@phosphor-icons/react';
-import { extendedDissociationStart, extendedSpacingAdjustStart } from './domain/sceneGeometry';
+import { extendedDissociationStart, extendedSpacingAdjustStart, partialSeparation } from './domain/sceneGeometry';
 
 const displayLabels: { key: keyof DisplayOptions; label: string }[] = [
   { key: 'atoms', label: '基体原子' }, { key: 'lattice', label: '晶格线' }, { key: 'line', label: '位错线' },
@@ -26,6 +26,9 @@ export function App() {
   const surfaceStepScene = sceneId === 'screw' || sceneId === 'screw-glide';
   const showsShearStress = stressScene && options.stress;
   const showsSurfaceStep = surfaceStepScene && options.surfaceStep;
+  const showsFaultPlane = moduleId === 'partial' && options.plane && (
+    sceneId === 'frank' || sceneId === 'shockley' || (sceneId === 'extended' && partialSeparation(sceneId, progress, spacing) > .08)
+  );
   const formatVector = (vector: readonly number[]) => `[${vector.map(value => Number.isInteger(value) ? String(value) : value.toFixed(2)).join(' ')}]`;
 
   return <div className="app-shell">
@@ -70,8 +73,17 @@ export function App() {
       <section className="stage panel" aria-label="三维位错场景">
         <div className="stage-header"><div className="stage-heading"><img className="stage-logo" src={`${import.meta.env.BASE_URL}logo.png`} alt="" /><h2>{scene.title}</h2></div><span className="stage-pill">3D 可交互</span></div>
         <div className="stage-subtitle"><span className="stage-category">{modules.find(item => item.id === moduleId)?.label}</span><p>{scene.subtitle}</p></div>
-        <SceneCanvas ref={canvas} id={sceneId} progressRef={progressRef} options={options} autoRotate={autoRotate} spacing={spacing} />
-        <div className="scene-legend"><span><i className="legend-dot orange" />位错线 L₁</span>{(moduleId === 'intersection' || (moduleId === 'partial' && sceneId !== 'frank' && (sceneId !== 'extended' || progress > extendedDissociationStart))) && <span><i className="legend-dot blue" />位错线 L₂</span>}<span><i className="legend-dot pale" />{moduleId === 'partial' ? '层错面' : '滑移面'}</span>{moduleId === 'intersection' && progress > .45 && options.line && <span><i className="legend-dot intersection" />交割点</span>}{(moduleId === 'motion' || moduleId === 'intersection') && options.trajectory && <span><i className={`legend-dot ${moduleId === 'intersection' ? 'intersection-traj' : 'motion'}`} />{moduleId === 'intersection' ? '两线接近轨迹' : '运动路径与方向'}</span>}{showsShearStress && <span><i className="legend-dot stress" />τ 外加切应力</span>}{showsSurfaceStep && <span><i className="legend-dot surface-step" />表面台阶/滑移分界</span>}</div>
+        <SceneCanvas ref={canvas} id={sceneId} progress={progress} progressRef={progressRef} playing={playing} options={options} autoRotate={autoRotate} spacing={spacing} />
+        <div className="scene-legend">
+          {options.line && <span><i className="legend-dot orange" />位错线 L₁</span>}
+          {options.line && (moduleId === 'intersection' || (moduleId === 'partial' && sceneId !== 'frank' && (sceneId !== 'extended' || progress > extendedDissociationStart))) && <span><i className="legend-dot blue" />位错线 L₂</span>}
+          {options.plane && <span><i className="legend-dot pale" />滑移面</span>}
+          {showsFaultPlane && <span><i className="legend-dot fault" />层错面</span>}
+          {moduleId === 'intersection' && progress > .45 && options.line && <span><i className="legend-dot intersection" />交割点</span>}
+          {(moduleId === 'motion' || moduleId === 'intersection') && options.trajectory && <span><i className={`legend-dot ${moduleId === 'intersection' ? 'intersection-traj' : 'motion'}`} />{moduleId === 'intersection' ? '两线接近轨迹' : '运动路径与方向'}</span>}
+          {showsShearStress && <span><i className="legend-dot stress" />τ 外加切应力</span>}
+          {showsSurfaceStep && <span><i className="legend-dot surface-step" />表面台阶/滑移分界</span>}
+        </div>
         <div className="stage-footnote">拖动旋转 · 滚轮缩放 · 中键/右键平移<span>模型为教学几何示意，非原子级物理仿真</span></div>
       </section>
 

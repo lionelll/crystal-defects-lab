@@ -13,10 +13,10 @@ describe('scene display defaults', () => {
     expect(screw.surfaceStep).toBe(false);
   });
 
-  it('keeps the optional screw step hidden initially and restores the Burgers vector outside motion', () => {
+  it('shows the required static screw step by default after visiting screw glide', () => {
     const motion = displayOptionsForScene(defaultOptions, 'screw-glide');
     const model = displayOptionsForScene(motion, 'screw');
-    expect(model.surfaceStep).toBe(false);
+    expect(model.surfaceStep).toBe(true);
     expect(model.burgers).toBe(true);
     expect(model.trajectory).toBe(false);
   });
@@ -36,17 +36,19 @@ describe('scene display defaults', () => {
     expect(displayOptionsForScene({ ...frankRead, stress: false }, 'edge-glide').stress).toBe(false);
   });
 
-  it('preserves a user-selected surface step across screw scenes', () => {
-    const model = displayOptionsForScene(defaultOptions, 'screw');
-    const glide = displayOptionsForScene({ ...model, surfaceStep: true }, 'screw-glide');
+  it('remembers surface-step choices separately for both screw scenes', () => {
+    const memory = { screw: false, 'screw-glide': true };
+    const model = displayOptionsForScene(defaultOptions, 'screw', memory);
+    const glide = displayOptionsForScene(model, 'screw-glide', memory);
+    expect(model.surfaceStep).toBe(false);
     expect(glide.surfaceStep).toBe(true);
-    expect(displayOptionsForScene({ ...glide, surfaceStep: false }, 'screw').surfaceStep).toBe(false);
+    expect(displayOptionsForScene(glide, 'screw', memory).surfaceStep).toBe(false);
   });
 
   it('aligns motion guidance with overlays that start hidden', () => {
     expect(sceneById['edge-glide'].stages[0]).toBe('滑移起始');
     expect(sceneById['cross-slip'].observe.some(text => text.includes('打开“伯氏矢量”'))).toBe(true);
-    expect(sceneById.screw.observe.some(text => text.includes('打开“表面台阶”'))).toBe(true);
+    expect(sceneById.screw.observe.some(text => text.includes('金色台阶'))).toBe(true);
     expect(sceneById['screw-glide'].observe.some(text => text.includes('打开“表面台阶”'))).toBe(true);
   });
 });

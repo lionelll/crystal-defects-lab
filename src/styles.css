@@ -489,6 +489,9 @@ button:focus-visible,input:focus-visible {
 .legend-dot.intersection-traj {
   background:linear-gradient(90deg,#d19884 50%,#9fbbdd 50%)
 }
+.legend-dot.fault {
+  background:#f2ba58
+}
 .scene-legend {
   flex-wrap:wrap;
   max-width:calc(100% - 40px)
@@ -794,6 +797,15 @@ button:focus-visible,input:focus-visible {
   }
   .timeline-left {
     flex-basis:155px
+  }
+}
+@media(max-width:1280px) {
+  .timeline.panel {
+    position:sticky;
+    bottom:0;
+    z-index:5;
+    background-color:var(--bg);
+    background-image:linear-gradient(180deg,rgba(25,37,51,.88),rgba(14,24,35,.88))
   }
 }
 .vector-grid {
