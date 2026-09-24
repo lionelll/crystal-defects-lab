@@ -9,9 +9,9 @@ import { ArrowCounterClockwise, ArrowsClockwise, Pause, Play } from '@phosphor-i
 import { extendedDissociationStart, extendedSpacingAdjustStart } from './domain/sceneGeometry';
 
 const displayLabels: { key: keyof DisplayOptions; label: string }[] = [
-  { key: 'atoms', label: '原子' }, { key: 'lattice', label: '晶格线' }, { key: 'line', label: '位错线' },
+  { key: 'atoms', label: '基体原子' }, { key: 'lattice', label: '晶格线' }, { key: 'line', label: '位错线' },
   { key: 'burgers', label: '伯氏矢量' }, { key: 'plane', label: '晶面' }, { key: 'trajectory', label: '运动轨迹' },
-  { key: 'extraHalfPlane', label: '额外半原子面' },
+  { key: 'extraHalfPlane', label: '额外半原子面' }, { key: 'stress', label: '切应力' }, { key: 'surfaceStep', label: '表面台阶' },
 ];
 
 export function App() {
@@ -22,8 +22,10 @@ export function App() {
   } = lab;
   const canvas = useRef<SceneCanvasHandle>(null);
   const intersection = moduleId === 'intersection' ? intersectionConfig(sceneId as IntersectionId) : null;
-  const showsShearStress = sceneId === 'edge-glide' || sceneId === 'screw-glide' || sceneId === 'frank-read';
-  const showsSurfaceStep = (sceneId === 'screw' || sceneId === 'screw-glide') && options.plane;
+  const stressScene = sceneId === 'edge-glide' || sceneId === 'screw-glide' || sceneId === 'frank-read';
+  const surfaceStepScene = sceneId === 'screw' || sceneId === 'screw-glide';
+  const showsShearStress = stressScene && options.stress;
+  const showsSurfaceStep = surfaceStepScene && options.surfaceStep;
   const formatVector = (vector: readonly number[]) => `[${vector.map(value => Number.isInteger(value) ? String(value) : value.toFixed(2)).join(' ')}]`;
 
   return <div className="app-shell">
@@ -58,7 +60,9 @@ export function App() {
           <div className="display-grid">{displayLabels.filter(item =>
             (item.key !== 'extraHalfPlane' || ['edge', 'edge-glide', 'edge-climb'].includes(sceneId)) &&
             (item.key !== 'trajectory' || moduleId === 'motion' || moduleId === 'intersection') &&
-            (item.key !== 'lattice' || moduleId !== 'partial')
+            (item.key !== 'lattice' || moduleId !== 'partial') &&
+            (item.key !== 'stress' || stressScene) &&
+            (item.key !== 'surfaceStep' || surfaceStepScene)
           ).map(item => <label key={item.key} className={`display-toggle ${options[item.key] ? 'on' : ''}`}><input type="checkbox" checked={options[item.key]} onChange={() => toggleOption(item.key)} /><span className="toggle-track" /><span>{item.label}</span></label>)}</div>
         </section>
       </aside>
@@ -67,7 +71,7 @@ export function App() {
         <div className="stage-header"><div className="stage-heading"><img className="stage-logo" src={`${import.meta.env.BASE_URL}logo.png`} alt="" /><h2>{scene.title}</h2></div><span className="stage-pill">3D 可交互</span></div>
         <div className="stage-subtitle"><span className="stage-category">{modules.find(item => item.id === moduleId)?.label}</span><p>{scene.subtitle}</p></div>
         <SceneCanvas ref={canvas} id={sceneId} progressRef={progressRef} options={options} autoRotate={autoRotate} spacing={spacing} />
-        <div className="scene-legend"><span><i className="legend-dot orange" />位错线 L₁</span>{(moduleId === 'intersection' || (moduleId === 'partial' && sceneId !== 'frank' && (sceneId !== 'extended' || progress > extendedDissociationStart))) && <span><i className="legend-dot blue" />位错线 L₂</span>}<span><i className="legend-dot pale" />{moduleId === 'partial' ? '层错面' : '滑移面'}</span>{moduleId === 'intersection' && progress > .45 && options.line && <span><i className="legend-dot intersection" />交割点</span>}{moduleId === 'motion' && options.trajectory && <span><i className="legend-dot motion" />运动路径与方向</span>}{showsShearStress && <span><i className="legend-dot stress" />τ 外加切应力</span>}{showsSurfaceStep && <span><i className="legend-dot surface-step" />表面台阶/滑移分界</span>}</div>
+        <div className="scene-legend"><span><i className="legend-dot orange" />位错线 L₁</span>{(moduleId === 'intersection' || (moduleId === 'partial' && sceneId !== 'frank' && (sceneId !== 'extended' || progress > extendedDissociationStart))) && <span><i className="legend-dot blue" />位错线 L₂</span>}<span><i className="legend-dot pale" />{moduleId === 'partial' ? '层错面' : '滑移面'}</span>{moduleId === 'intersection' && progress > .45 && options.line && <span><i className="legend-dot intersection" />交割点</span>}{(moduleId === 'motion' || moduleId === 'intersection') && options.trajectory && <span><i className={`legend-dot ${moduleId === 'intersection' ? 'intersection-traj' : 'motion'}`} />{moduleId === 'intersection' ? '两线接近轨迹' : '运动路径与方向'}</span>}{showsShearStress && <span><i className="legend-dot stress" />τ 外加切应力</span>}{showsSurfaceStep && <span><i className="legend-dot surface-step" />表面台阶/滑移分界</span>}</div>
         <div className="stage-footnote">拖动旋转 · 滚轮缩放 · 中键/右键平移<span>模型为教学几何示意，非原子级物理仿真</span></div>
       </section>
 
@@ -96,9 +100,8 @@ export function App() {
     <footer className="timeline panel">
       <div className="timeline-left"><span className="timeline-overline">ANIMATION CONTROL</span><strong>{sceneId === 'frank-read' && progress >= 1 ? `第 ${Math.floor(progress) + 1} 轮 · ${stage}` : scene.animated ? stage : '旋转模型，观察空间结构'}</strong>{sceneId === 'frank-read' && <small>累计生成 {frankReadLoopCount(progress)} 个环</small>}</div>
       <div className="player">
-        {moduleId === 'intersection' && <button type="button" className="before-control" onClick={() => seek(0)}>交割前</button>}
         <button type="button" className="primary-control" onClick={playing ? pause : play} disabled={!scene.animated} aria-label={moduleId === 'intersection' ? (playing ? '暂停交割' : '开始交割') : (playing ? '暂停动画' : '播放动画')}>{playing ? 'Ⅱ' : '▶'}</button>
-        <button type="button" onClick={reset} disabled={!scene.animated} aria-label="重置动画">↶</button>
+        {moduleId === 'intersection' ? <button type="button" className="before-control" onClick={reset} disabled={!scene.animated} aria-label="交割前并重置动画">交割前／重置</button> : <button type="button" onClick={reset} disabled={!scene.animated} aria-label="重置动画">↶</button>}
         <button type="button" onClick={step} disabled={!scene.animated} aria-label="单步前进">↦</button>
       </div>
       <div className="timeline-progress"><input type="range" min="0" max="1000" value={Math.round((sceneId === 'frank-read' ? progress % 1 : progress) * 1000)} onChange={event => seek(Number(event.target.value) / 1000)} disabled={!scene.animated} aria-label="动画进度" /><span>{Math.round((sceneId === 'frank-read' ? progress % 1 : progress) * 100)}%</span></div>

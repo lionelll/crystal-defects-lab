@@ -36,6 +36,9 @@ describe('PRD first-edition scene coverage', () => {
     const glide = scenes.find(scene => scene.id === 'edge-glide')!;
     expect(seekProgress(source, 1.2, .5)).toBeCloseTo(1.5);
     expect(seekProgress(source, 2.8, .25)).toBeCloseTo(2.25);
+    expect(seekProgress(source, 1.2, 1)).toBeGreaterThan(1.99);
+    expect(seekProgress(source, 1.2, 1)).toBeLessThan(2);
+    expect(frankReadLoopCount(seekProgress(source, 1.2, 1))).toBe(4);
     expect(seekProgress(glide, .8, .25)).toBeCloseTo(.25);
   });
 });

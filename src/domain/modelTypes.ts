@@ -6,4 +6,6 @@ export interface DisplayOptions {
   plane: boolean;
   trajectory: boolean;
   extraHalfPlane: boolean;
+  stress: boolean;
+  surfaceStep: boolean;
 }

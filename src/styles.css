@@ -486,6 +486,9 @@ button:focus-visible,input:focus-visible {
 .legend-dot.intersection {
   background:#f6bf6d
 }
+.legend-dot.intersection-traj {
+  background:linear-gradient(90deg,#d19884 50%,#9fbbdd 50%)
+}
 .scene-legend {
   flex-wrap:wrap;
   max-width:calc(100% - 40px)
@@ -690,7 +693,7 @@ button:focus-visible,input:focus-visible {
 }
 .player .before-control {
   width:auto;
-  min-width:56px;
+  min-width:94px;
   padding:0 7px;
   font-size:11px
 }

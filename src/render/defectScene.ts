@@ -320,9 +320,9 @@ export class DefectScene {
         this.staticLayer.add(this.atoms);
       }
     }
-    if (sceneChanged || settings.atoms !== previous.atoms || settings.extraHalfPlane !== previous.extraHalfPlane) {
+    if (sceneChanged || settings.extraHalfPlane !== previous.extraHalfPlane) {
       if (this.extra) { this.staticLayer.remove(this.extra); disposeObject(this.extra); this.extra = null; }
-      if (settings.atoms && settings.extraHalfPlane && !partial && ['edge', 'edge-glide', 'edge-climb'].includes(id)) {
+      if (settings.extraHalfPlane && !partial && ['edge', 'edge-glide', 'edge-climb'].includes(id)) {
         this.extra = new THREE.InstancedMesh(new THREE.SphereGeometry(.095, 10, 8), new THREE.MeshStandardMaterial({ color: 0xf39a64, roughness: .4 }), 2 * 5);
         this.extra.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
         this.staticLayer.add(this.extra);
@@ -357,36 +357,38 @@ export class DefectScene {
   }
 
   private updateAtoms(id: SceneId, p: number, spacing: number) {
-    if (!this.atoms) return;
     const partial = ['extended', 'shockley', 'frank'].includes(id);
     const screw = ['screw', 'screw-glide', 'cross-slip'].includes(id);
     const edge = ['edge', 'edge-glide', 'edge-climb'].includes(id);
     const core = edge ? edgeState(id, p) : screwState(id, p);
-    let index = 0;
-    if (partial) {
-      const d = partialSeparation(id, p, spacing);
-      for (let layer = -2; layer <= 2; layer++) for (let j = -3; j <= 3; j++) for (let i = -3; i <= 3; i++) {
-        const { position, inFault, missing } = id === 'frank'
-          ? frankFaultAtomPosition(i, j, layer)
-          : { ...fccAtomPosition(i, j, layer, d), missing: false };
-        temp.position.set(...position);
-        temp.scale.setScalar(missing ? 0 : 1); temp.updateMatrix(); this.atoms.setMatrixAt(index, temp.matrix);
-        this.atoms.setColorAt(index, inFault ? atomFaultColor : layer === 0 ? atomMiddleLayerColor : atomDefaultColor);
-        index++;
+    const atoms = this.atoms;
+    if (atoms) {
+      let index = 0;
+      if (partial) {
+        const d = partialSeparation(id, p, spacing);
+        for (let layer = -2; layer <= 2; layer++) for (let j = -3; j <= 3; j++) for (let i = -3; i <= 3; i++) {
+          const { position, inFault, missing } = id === 'frank'
+            ? frankFaultAtomPosition(i, j, layer)
+            : { ...fccAtomPosition(i, j, layer, d), missing: false };
+          temp.position.set(...position);
+          temp.scale.setScalar(missing ? 0 : 1); temp.updateMatrix(); atoms.setMatrixAt(index, temp.matrix);
+          atoms.setColorAt(index, inFault ? atomFaultColor : layer === 0 ? atomMiddleLayerColor : atomDefaultColor);
+          index++;
+        }
+      } else {
+        for (let k = -2; k <= 2; k++) for (let j = -2; j <= 2; j++) for (let i = -3; i <= 3; i++) {
+          const [x, y, z] = cubicAtomPosition(id, p, i, j, k);
+          temp.position.set(x, y, z);
+          const vacancyI = vacancyLatticeIndex(p);
+          temp.scale.setScalar(id === 'edge-climb' && j === 1 && k === 0 && i === vacancyI ? 0 : 1);
+          temp.updateMatrix(); atoms.setMatrixAt(index, temp.matrix);
+          atoms.setColorAt(index, edge && j > 0 && Math.abs(i) < 2 ? atomEdgeHighlightColor : screw && y > 0 && x > core.x ? atomScrewHighlightColor : atomDefaultColor);
+          index++;
+        }
       }
-    } else {
-      for (let k = -2; k <= 2; k++) for (let j = -2; j <= 2; j++) for (let i = -3; i <= 3; i++) {
-        const [x, y, z] = cubicAtomPosition(id, p, i, j, k);
-        temp.position.set(x, y, z);
-        const vacancyI = vacancyLatticeIndex(p);
-        temp.scale.setScalar(id === 'edge-climb' && j === 1 && k === 0 && i === vacancyI ? 0 : 1);
-        temp.updateMatrix(); this.atoms.setMatrixAt(index, temp.matrix);
-        this.atoms.setColorAt(index, edge && j > 0 && Math.abs(i) < 2 ? atomEdgeHighlightColor : screw && y > 0 && x > core.x ? atomScrewHighlightColor : atomDefaultColor);
-        index++;
-      }
+      atoms.instanceMatrix.needsUpdate = true;
+      if (atoms.instanceColor) atoms.instanceColor.needsUpdate = true;
     }
-    this.atoms.instanceMatrix.needsUpdate = true;
-    if (this.atoms.instanceColor) this.atoms.instanceColor.needsUpdate = true;
     if (this.extra) {
       for (let k = 0; k < 5; k++) for (let j = 0; j < 2; j++) {
         temp.position.set(core.x, .48 + j * .74 + core.y, (k - 2) * .75); temp.scale.setScalar(1); temp.updateMatrix(); this.extra.setMatrixAt(k * 2 + j, temp.matrix);
@@ -405,7 +407,7 @@ export class DefectScene {
     }
     if (s.line) addLine(this.dynamicLayer, [V(x, y, -1.9), V(x, y, 1.9)], lineOrange, .077);
     if (s.burgers) { addArrow(this.dynamicLayer, V(x + .15, y + .13, 1.93), V(.85, 0, 0), lineBlue); addArrow(this.dynamicLayer, V(x - .2, y, -2.12), V(0, 0, 1), ink, .85); }
-    if (id === 'edge-glide') {
+    if (id === 'edge-glide' && s.stress) {
       addShearArrow(this.dynamicLayer, V(-1.95, 1.7, -2.1), V(.68, 0, 0));
       addShearArrow(this.dynamicLayer, V(1.95, -1.7, -2.1), V(-.68, 0, 0));
     }
@@ -434,18 +436,18 @@ export class DefectScene {
     if (s.plane) {
       if (id === 'screw') addHelicoid(this.dynamicLayer, x, y, -.65, screwPitch);
       else addPlane(this.dynamicLayer, V(0, 0, 0), V(0, 1, 0), 5.2, 3.8, planeBlue, .13);
-      if (id === 'screw' || id === 'screw-glide') {
-        addHelicoid(this.dynamicLayer, x, y, 1.45, screwPitch);
-        addPlane(this.dynamicLayer, V(x - 1.12, y, 1.45), V(0, 1, 0), 2.1, screwPitch, surfaceStepGold, .13);
-        addLine(this.dynamicLayer, [V(x - 2.17, y - .018, 1.45 - screwPitch / 2), V(x - .18, y - .018, 1.45 - screwPitch / 2)], surfaceStepGold, .038);
-        addLine(this.dynamicLayer, [V(x - 2.17, y + .018, 1.45 + screwPitch / 2), V(x - .18, y + .018, 1.45 + screwPitch / 2)], surfaceStepGold, .038);
-        addLine(this.dynamicLayer, [V(x - 2.17, y, 1.45 - screwPitch / 2), V(x - 2.17, y, 1.45 + screwPitch / 2)], surfaceStepGold, .028);
-      }
       if (id === 'cross-slip') addPlane(this.dynamicLayer, V(secondCrossSlipPlaneX, 0, 0), V(1, 0, 0), 3.8, 3.2, 0x7ec3a8, .13);
+    }
+    if ((id === 'screw' || id === 'screw-glide') && s.surfaceStep) {
+      addHelicoid(this.dynamicLayer, x, y, 1.45, screwPitch);
+      addPlane(this.dynamicLayer, V(x - 1.12, y, 1.45), V(0, 1, 0), 2.1, screwPitch, surfaceStepGold, .13);
+      addLine(this.dynamicLayer, [V(x - 2.17, y - .018, 1.45 - screwPitch / 2), V(x - .18, y - .018, 1.45 - screwPitch / 2)], surfaceStepGold, .038);
+      addLine(this.dynamicLayer, [V(x - 2.17, y + .018, 1.45 + screwPitch / 2), V(x - .18, y + .018, 1.45 + screwPitch / 2)], surfaceStepGold, .038);
+      addLine(this.dynamicLayer, [V(x - 2.17, y, 1.45 - screwPitch / 2), V(x - 2.17, y, 1.45 + screwPitch / 2)], surfaceStepGold, .028);
     }
     if (s.line) addLine(this.dynamicLayer, [V(x, y, -2), V(x, y, 2)], lineOrange, .078);
     if (s.burgers) { addArrow(this.dynamicLayer, V(x + .3, y + .2, -1), V(0, 0, 1), lineBlue, .85); addArrow(this.dynamicLayer, V(x - .28, y, -1.8), V(0, 0, 1), ink, .6); }
-    if (id === 'screw-glide') {
+    if (id === 'screw-glide' && s.stress) {
       addShearArrow(this.dynamicLayer, V(-2.1, 1.7, -.95), V(0, 0, .7));
       addShearArrow(this.dynamicLayer, V(2.1, -1.7, .95), V(0, 0, -.7));
     }
@@ -470,8 +472,10 @@ export class DefectScene {
       state.loops.forEach((loop, index) => addLoop(this.dynamicLayer, fromTuple(loop.center), loop.radius, index === 0 ? 0xe9a047 : 0xf1bb65, 'xy', loop.opacity));
     }
     if (s.burgers) addArrow(this.dynamicLayer, V(-2.35, -.42, 0), V(0, .95, 0), lineBlue);
-    addShearArrow(this.dynamicLayer, V(-2.55, -.5, .65), V(0, .72, 0));
-    addShearArrow(this.dynamicLayer, V(2.55, .5, -.65), V(0, -.72, 0));
+    if (s.stress) {
+      addShearArrow(this.dynamicLayer, V(-2.55, -.5, .65), V(0, .72, 0));
+      addShearArrow(this.dynamicLayer, V(2.55, .5, -.65), V(0, -.72, 0));
+    }
   }
 
   private drawDoubleCrossSlip(p: number, s: DisplayOptions) {

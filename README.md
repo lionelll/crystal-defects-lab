@@ -4,6 +4,8 @@
 
 共用界面参数与本地验收流程见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
+本项目后续在 `dev` 开发，`release` 用于获准发布，`main` 在发布验收后同步 `release`；分支职责与授权边界以本项目 `AGENTS.md`、`DEVELOPMENT.md` 及用户最新当次指令为准。
+
 ## 本地运行
 
 需要 Node.js 20 或更新版本。

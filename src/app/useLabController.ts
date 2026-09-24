@@ -3,7 +3,16 @@ import { sceneById, scenes, type ModuleId, type SceneId } from '../data/scenes';
 import type { DisplayOptions } from '../domain/modelTypes';
 import { playbackDurationMs, seekProgress, stageAt, stepProgress } from './playback';
 
-const defaultOptions: DisplayOptions = { atoms: true, lattice: false, line: true, burgers: true, plane: true, trajectory: false, extraHalfPlane: true };
+export const defaultOptions: DisplayOptions = { atoms: true, lattice: false, line: true, burgers: true, plane: true, trajectory: false, extraHalfPlane: true, stress: false, surfaceStep: false };
+
+export function displayOptionsForScene(current: DisplayOptions, id: SceneId): DisplayOptions {
+  const module = sceneById[id].module;
+  return {
+    ...current,
+    burgers: module !== 'motion',
+    trajectory: module === 'motion' || module === 'intersection',
+  };
+}
 
 export function useLabController() {
   const [sceneId, setSceneId] = useState<SceneId>('edge');
@@ -53,7 +62,7 @@ export function useLabController() {
     setProgress(0);
     setPlaying(false);
     setSpacing(1.7);
-    setOptions(current => ({ ...current, trajectory: sceneById[id].module === 'motion' }));
+    setOptions(current => displayOptionsForScene(current, id));
   };
   const pickModule = (id: ModuleId) => {
     const first = scenes.find(item => item.module === id);

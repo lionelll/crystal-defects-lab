@@ -5,7 +5,7 @@ import type { DisplayOptions } from '../domain/modelTypes';
 
 const options: DisplayOptions = {
   atoms: true, lattice: false, line: true, burgers: true, plane: true,
-  trajectory: true, extraHalfPlane: true,
+  trajectory: true, extraHalfPlane: true, stress: true, surfaceStep: true,
 };
 
 describe('animated render resource reuse', () => {
@@ -49,10 +49,27 @@ describe('animated render resource reuse', () => {
     expect((staticLayer.children.find(child => child instanceof THREE.InstancedMesh) as THREE.InstancedMesh).uuid).toBe(atomId);
     visual.update('edge-glide', .3, { ...options, extraHalfPlane: false });
     expect((staticLayer.children.find(child => child instanceof THREE.InstancedMesh) as THREE.InstancedMesh).uuid).toBe(atomId);
-    visual.update('edge-glide', .3, { ...options, atoms: false });
-    expect(staticLayer.children).toHaveLength(0);
     visual.update('edge-glide', .3, options);
-    expect(staticLayer.children[0].uuid).not.toBe(atomId);
+    const extraId = (staticLayer.children.find(child => child instanceof THREE.InstancedMesh && child.count === 10) as THREE.InstancedMesh).uuid;
+    visual.update('edge-glide', .3, { ...options, atoms: false });
+    expect(staticLayer.children).toHaveLength(1);
+    expect(staticLayer.children[0].uuid).toBe(extraId);
+    visual.update('edge-glide', .3, options);
+    expect((staticLayer.children.find(child => child instanceof THREE.InstancedMesh && child.count === 175) as THREE.InstancedMesh).uuid).not.toBe(atomId);
+    expect((staticLayer.children.find(child => child instanceof THREE.InstancedMesh && child.count === 10) as THREE.InstancedMesh).uuid).toBe(extraId);
+    visual.dispose();
+  });
+  it('hides stress arrows independently and keeps the screw surface step when its plane is hidden', () => {
+    const visual = new DefectScene();
+    const dynamic = visual.scene.children.at(-1) as THREE.Group;
+    visual.update('edge-glide', .2, options);
+    const withStress = dynamic.children.filter(child => child.visible).length;
+    visual.update('edge-glide', .2, { ...options, stress: false });
+    expect(dynamic.children.filter(child => child.visible).length).toBe(withStress - 4);
+    visual.update('screw', 0, { ...options, plane: false, surfaceStep: true });
+    const withStep = dynamic.children.filter(child => child.visible).length;
+    visual.update('screw', 0, { ...options, plane: false, surfaceStep: false });
+    expect(dynamic.children.filter(child => child.visible).length).toBe(withStep - 5);
     visual.dispose();
   });
 });

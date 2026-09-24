@@ -24,5 +24,5 @@ export function stepProgress(scene: SceneInfo, progress: number) {
 }
 
 export function seekProgress(scene: SceneInfo, current: number, value: number) {
-  return scene.id === 'frank-read' ? Math.floor(current) + value : value;
+  return scene.id === 'frank-read' ? Math.floor(current) + Math.max(0, Math.min(value, 1 - 1e-6)) : value;
 }
