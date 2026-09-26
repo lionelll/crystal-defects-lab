@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as THREE from 'three';
 import { add, dot, fcc111Normal, frankBurgers, frankReadLoopCount, frankReadState, fullFccBurgers, intersectionConfig, isJog, leadingShockley, trailingShockley, type IntersectionId } from './geometry';
 import { modules, scenes } from '../data/scenes';
 import { seekProgress, stageAt, stepProgress } from '../app/playback';
@@ -18,7 +19,8 @@ describe('PRD first-edition scene coverage', () => {
     expect(stageAt(source, .385)).toBe('首个环脱离');
     const doubleSlip = scenes.find(scene => scene.id === 'double-cross-slip')!;
     expect(stageAt(doubleSlip, .75)).toBe('第二次交滑移');
-    expect(stageAt(doubleSlip, .8)).toBe('环形成');
+    expect(stageAt(doubleSlip, .8)).toBe('第二次交滑移');
+    expect(stageAt(doubleSlip, .86)).toBe('环形成');
     const intersection = scenes.find(scene => scene.id === 'edge-screw')!;
     expect(stageAt(intersection, .03)).toBe('交割前');
     expect(stageAt(intersection, .04)).toBe('相向运动');
@@ -86,6 +88,21 @@ describe('intersection candidate geometry', () => {
 });
 
 describe('Frank–Read source topology', () => {
+  it('does not cross itself during either bowing generation', () => {
+    const intersects = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3) => {
+      const orient = (p: THREE.Vector3, q: THREE.Vector3, r: THREE.Vector3) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+      return orient(a, b, c) * orient(a, b, d) < -1e-6 && orient(c, d, a) * orient(c, d, b) < -1e-6;
+    };
+    for (let phase = 0; phase < .699; phase += .005) {
+      const source = frankReadState(.55 * phase).source;
+      const points = new THREE.CatmullRomCurve3(source.map(([x, y, z]) => new THREE.Vector3(x, y, z))).getPoints(96);
+      for (let i = 0; i < points.length - 1; i++) {
+        for (let j = i + 2; j < points.length - 1; j++) {
+          expect(intersects(points[i], points[i + 1], points[j], points[j + 1]), `phase ${phase}, segments ${i}/${j}`).toBe(false);
+        }
+      }
+    }
+  });
   it('keeps both pinning points fixed throughout two generations', () => {
     for (const p of [0, .1, .25, .36, .4, .54, .6, .86, 1]) {
       const source = frankReadState(p).source;
@@ -95,41 +112,58 @@ describe('Frank–Read source topology', () => {
   });
   it('creates a loop only after self-contact, then produces a second loop', () => {
     expect(frankReadState(.34).loops).toHaveLength(0);
-    expect(frankReadState(.36).inContact).toBe(true);
+    expect(frankReadState(.375).inContact).toBe(true);
     expect(frankReadState(.4).loops).toHaveLength(1);
     expect(frankReadState(.75).loops).toHaveLength(1);
     expect(frankReadState(.9).loops).toHaveLength(2);
   });
   it('moves its bow continuously away from the topological split', () => {
-    const before = frankReadState(.20).source[4];
-    const after = frankReadState(.201).source[4];
+    const before = frankReadState(.20).source[6];
+    const after = frankReadState(.201).source[6];
     expect(Math.abs(after[1] - before[1])).toBeLessThan(.03);
   });
-  it.each([.55 * .7, .55 + .45 * .7])('keeps the source curve continuous across loop separation at %s', boundary => {
+  it.each([.55 * .7, .55 + .45 * .7])('transfers the outer contour to a loop at %s without retracting it through the source', boundary => {
     const before = frankReadState(boundary - .00001);
     const after = frankReadState(boundary + .00001);
-    expect(before.source).toHaveLength(9);
-    expect(after.source).toHaveLength(9);
-    for (let i = 0; i < 9; i++) {
-      const distance = Math.hypot(...before.source[i].map((value, axis) => value - after.source[i][axis]));
+    expect(before.source).toHaveLength(13);
+    expect(after.source).toHaveLength(5);
+    expect(before.source[6][1]).toBeGreaterThan(2.5);
+    for (const [index, original] of [0, 1, 2, 11, 12].entries()) {
+      const distance = Math.hypot(...before.source[original].map((value, axis) => value - after.source[index][axis]));
       expect(distance).toBeLessThan(.01);
     }
     expect(after.loops).toHaveLength(before.loops.length + 1);
-    expect(after.loops.at(-1)!.opacity).toBeLessThan(.01);
+    expect(after.loops.at(-1)!.opacity).toBeGreaterThan(.99);
+    after.loops.at(-1)!.points.forEach((point, index) => {
+      const distance = Math.hypot(...point.map((value, axis) => value - before.source[index + 2][axis]));
+      expect(distance).toBeLessThan(.01);
+    });
+    expect(frankReadState(boundary + .04).source[2][1]).toBeCloseTo(0);
   });
-  it('starts detached loops at the contact curve and fades them in as the source recovers', () => {
-    const contact = frankReadState(.385);
+  it('joins the two arms behind the pins before the loop separates', () => {
+    const contact = frankReadState(.384999);
     const later = frankReadState(.5);
-    expect(contact.source[4][1]).toBeCloseTo(2.55);
-    expect(contact.loops[0].center[1] + contact.loops[0].radiusY).toBeCloseTo(2.55);
+    for (let index = 0; index < contact.source.length; index++) {
+      const mirror = contact.source[contact.source.length - 1 - index];
+      expect(contact.source[index][0]).toBeCloseTo(-mirror[0]);
+      expect(contact.source[index][1]).toBeCloseTo(mirror[1]);
+    }
+    contact.source[2].forEach((value, axis) => expect(value).toBeCloseTo(contact.source[10][axis], 2));
+    expect(contact.contactOpacity).toBeCloseTo(1, 1);
+    expect(frankReadState(.43).contactOpacity).toBeLessThan(.01);
+    expect(contact.source.filter(point => point[0] === -2 && point[1] === 0)).toHaveLength(1);
+    expect(contact.source.filter(point => point[0] === 2 && point[1] === 0)).toHaveLength(1);
+    expect(Math.abs(frankReadState(.43).source[2][1])).toBeLessThan(.01);
+    expect(contact.source[6][1]).toBeCloseTo(2.55);
+    expect(frankReadState(.385).loops[0].center[1] + frankReadState(.385).loops[0].radiusY).toBeCloseTo(2.55);
     for (const pinX of [-2, 2]) {
-      const loop = contact.loops[0];
+      const loop = frankReadState(.385).loops[0];
       const ellipse = (pinX / loop.radiusX) ** 2 + (loop.center[1] / loop.radiusY) ** 2;
       expect(ellipse).toBeLessThan(1);
     }
-    expect(contact.loops[0].opacity).toBe(0);
+    expect(frankReadState(.385).loops[0].opacity).toBe(1);
     expect(later.loops[0].opacity).toBeGreaterThan(.9);
-    expect(Math.abs(later.source[4][1])).toBeLessThan(.5);
+    expect(Math.abs(later.source[2][1])).toBeLessThan(.5);
     expect(later.loops[0].center[1] + later.loops[0].radiusY).toBeLessThan(3.2);
     for (const p of [.4, .9, 1.4]) {
       expect(frankReadState(p).source.every(point => point[2] === 0)).toBe(true);

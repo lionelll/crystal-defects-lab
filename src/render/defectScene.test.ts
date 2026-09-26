@@ -38,25 +38,71 @@ describe('animated render resource reuse', () => {
   });
   it('keeps atom instances when only overlays change, and rebuilds them when atoms change', () => {
     const visual = new DefectScene();
-    visual.update('edge-glide', .3, options);
+    visual.update('edge', .3, options);
     const staticLayer = visual.scene.children.at(-2) as THREE.Group;
     const atomId = staticLayer.children[0].uuid;
-    visual.update('edge-glide', .3, { ...options, line: false });
+    visual.update('edge', .3, { ...options, line: false });
     expect(staticLayer.children[0].uuid).toBe(atomId);
-    visual.update('edge-glide', .3, { ...options, trajectory: false });
+    visual.update('edge', .3, { ...options, trajectory: false });
     expect(staticLayer.children[0].uuid).toBe(atomId);
-    visual.update('edge-glide', .3, { ...options, lattice: true });
+    visual.update('edge', .3, { ...options, lattice: true });
     expect((staticLayer.children.find(child => child instanceof THREE.InstancedMesh) as THREE.InstancedMesh).uuid).toBe(atomId);
-    visual.update('edge-glide', .3, { ...options, extraHalfPlane: false });
+    visual.update('edge', .3, { ...options, extraHalfPlane: false });
     expect((staticLayer.children.find(child => child instanceof THREE.InstancedMesh) as THREE.InstancedMesh).uuid).toBe(atomId);
-    visual.update('edge-glide', .3, options);
+    visual.update('edge', .3, options);
     const extraId = (staticLayer.children.find(child => child instanceof THREE.InstancedMesh && child.count === 10) as THREE.InstancedMesh).uuid;
-    visual.update('edge-glide', .3, { ...options, atoms: false });
+    visual.update('edge', .3, { ...options, atoms: false });
     expect(staticLayer.children).toHaveLength(1);
     expect(staticLayer.children[0].uuid).toBe(extraId);
-    visual.update('edge-glide', .3, options);
+    visual.update('edge', .3, options);
     expect((staticLayer.children.find(child => child instanceof THREE.InstancedMesh && child.count === 175) as THREE.InstancedMesh).uuid).not.toBe(atomId);
     expect((staticLayer.children.find(child => child instanceof THREE.InstancedMesh && child.count === 10) as THREE.InstancedMesh).uuid).toBe(extraId);
+    visual.dispose();
+  });
+  it('does not duplicate glide atoms with a second orange half-plane column', () => {
+    const visual = new DefectScene();
+    const staticLayer = visual.scene.children.at(-2) as THREE.Group;
+    const dynamicLayer = visual.scene.children.at(-1) as THREE.Group;
+    for (const progress of [0, .5, 1]) {
+      visual.update('edge-glide', progress, options);
+      expect(staticLayer.children.filter(child => child instanceof THREE.InstancedMesh && child.count === 10)).toHaveLength(0);
+    }
+    const finalWithGuide = dynamicLayer.children.filter(child => child.visible).length;
+    visual.update('edge-glide', 1, { ...options, extraHalfPlane: false });
+    expect(dynamicLayer.children.filter(child => child.visible).length).toBe(finalWithGuide);
+    const finalWithLine = dynamicLayer.children.filter(child => child.visible).length;
+    visual.update('edge-glide', 1, { ...options, extraHalfPlane: false, line: false });
+    expect(dynamicLayer.children.filter(child => child.visible).length).toBe(finalWithLine);
+    visual.dispose();
+  });
+  it('aligns the glide line and half-plane guide with the interlayer slip plane', () => {
+    const visual = new DefectScene();
+    visual.update('edge-glide', .5, options);
+    const dynamic = visual.scene.children.at(-1) as THREE.Group;
+    expect(dynamic.children[0].position.y).toBeCloseTo(-.375);
+    expect(dynamic.children[1].position.y - (dynamic.children[1].scale.y / 2)).toBeCloseTo(-.375);
+    const line = dynamic.children[2].children[0] as THREE.Mesh<THREE.BufferGeometry>;
+    line.geometry.computeBoundingBox();
+    const bounds = line.geometry.boundingBox!;
+    expect((bounds.min.y + bounds.max.y) / 2).toBeCloseTo(-.375);
+    visual.dispose();
+  });
+  it('moves edge-glide atom highlighting with the core and clears it after exit', () => {
+    const visual = new DefectScene();
+    const color = new THREE.Color();
+    const inspect = (progress: number, i: number) => {
+      visual.update('edge-glide', progress, options);
+      const staticLayer = visual.scene.children.at(-2) as THREE.Group;
+      const atoms = staticLayer.children.find(child => child instanceof THREE.InstancedMesh && child.count === 175) as THREE.InstancedMesh;
+      atoms.getColorAt(2 * 35 + 3 * 7 + i + 3, color);
+      return color.getHex();
+    };
+    const earlyLeft = inspect(.2, -2);
+    const earlyRight = inspect(.2, 2);
+    expect(earlyLeft).not.toBe(earlyRight);
+    expect(inspect(.7, -2)).toBe(earlyRight);
+    expect(inspect(.7, 2)).toBe(earlyLeft);
+    expect(inspect(1, 2)).toBe(earlyRight);
     visual.dispose();
   });
   it('hides stress arrows independently and keeps the screw surface step when its plane is hidden', () => {

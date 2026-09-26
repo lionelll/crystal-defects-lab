@@ -9,6 +9,18 @@ import type { DisplayOptions } from '../domain/modelTypes';
 export interface SceneCanvasHandle { resetView: () => void }
 interface Props { id: SceneId; progress: number; progressRef: { current: number }; playing: boolean; options: DisplayOptions; autoRotate: boolean; spacing: number }
 
+function restoreRecommendedView(visual: DefectScene, controls: OrbitControls) {
+  const damping = controls.enableDamping;
+  controls.enableDamping = false;
+  controls.autoRotate = false;
+  controls.update();
+  visual.resetCamera();
+  controls.target.set(0, 0, 0);
+  controls.update();
+  controls.saveState();
+  controls.enableDamping = damping;
+}
+
 export const SceneCanvas = memo(forwardRef<SceneCanvasHandle, Props>(function SceneCanvas({ id, progress, progressRef, playing, options, autoRotate, spacing }, ref) {
   const host = useRef<HTMLDivElement>(null);
   const model = useRef<DefectScene | null>(null);
@@ -18,15 +30,8 @@ export const SceneCanvas = memo(forwardRef<SceneCanvasHandle, Props>(function Sc
   const [error, setError] = useState(false);
 
   useImperativeHandle(ref, () => ({ resetView() {
-    model.current?.resetCamera();
-    if (orbit.current) {
-      const damping = orbit.current.enableDamping;
-      orbit.current.enableDamping = false;
-      orbit.current.autoRotate = false;
-      orbit.current.target.set(0, 0, 0);
-      orbit.current.update();
-      orbit.current.enableDamping = damping;
-    }
+    props.current.autoRotate = false;
+    if (model.current && orbit.current) restoreRecommendedView(model.current, orbit.current);
     requestRender.current();
   } }), []);
 
@@ -65,11 +70,7 @@ export const SceneCanvas = memo(forwardRef<SceneCanvasHandle, Props>(function Sc
       if (sceneChanged || nextProgress !== lastModelProgress || current.options !== lastModelOptions || current.spacing !== lastModelSpacing) {
         visual.update(current.id, nextProgress, current.options, current.spacing);
         if (sceneChanged) {
-          const damping = controls.enableDamping;
-          controls.enableDamping = false;
-          controls.target.set(0, 0, 0);
-          controls.update();
-          controls.enableDamping = damping;
+          restoreRecommendedView(visual, controls);
         }
         lastModelId = current.id;
         lastModelProgress = nextProgress;

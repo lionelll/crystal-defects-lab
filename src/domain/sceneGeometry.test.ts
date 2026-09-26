@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cubicAtomPosition, cubicSpacing, doubleCrossSlipParallelPlaneY, doubleCrossSlipPlaneX, doubleCrossSlipState, edgeBurgers, edgeState, extendedDissociationStart, extendedSpacingAdjustStart, fccAtomPosition, fccLatticePosition, fccNearestNeighbor, frankFaultAtomPosition, fullFccBurgersLocal, intersectionFrame, leadingShockleyLocal, partialSeparation, screwBaseY, screwPitch, screwState, secondCrossSlipPlaneX, trailingShockleyLocal, vacancyPosition } from './sceneGeometry';
+import { cubicAtomPosition, cubicSpacing, doubleCrossSlipParallelPlaneY, doubleCrossSlipPlaneX, doubleCrossSlipState, edgeBurgers, edgeGlideExitProgress, edgeState, extendedDissociationStart, extendedSpacingAdjustStart, fccAtomPosition, fccLatticePosition, fccNearestNeighbor, frankFaultAtomPosition, fullFccBurgersLocal, intersectionFrame, leadingShockleyLocal, partialSeparation, screwBaseY, screwPitch, screwState, secondCrossSlipPlaneX, trailingShockleyLocal, vacancyPosition } from './sceneGeometry';
 
 describe('edge and screw displacement geometry', () => {
   it('keeps edge glide in its plane while climb leaves that plane', () => {
@@ -10,7 +10,17 @@ describe('edge and screw displacement geometry', () => {
     expect(edgeState('edge-glide', 1).x).toBeGreaterThan(3 * cubicSpacing);
     const bottom = cubicAtomPosition('edge-glide', 1, 0, -1, 0);
     const top = cubicAtomPosition('edge-glide', 1, 0, 1, 0);
-    expect(bottom[0] - top[0]).toBeCloseTo(edgeBurgers);
+    expect(bottom[0] - top[0]).toBeCloseTo(-edgeBurgers);
+    expect(bottom[1]).toBeCloseTo(-cubicSpacing);
+    expect(top[1]).toBeCloseTo(cubicSpacing);
+    for (let step = 0; step <= 200; step++) {
+      const progress = step / 200;
+      for (let j = -2; j < 0; j++) for (let i = -3; i < 3; i++) {
+        const left = cubicAtomPosition('edge-glide', progress, i, j, 0);
+        const right = cubicAtomPosition('edge-glide', progress, i + 1, j, 0);
+        expect(Math.hypot(...left.map((value, axis) => value - right[axis]))).toBeGreaterThan(.6);
+      }
+    }
   });
   it('moves the vacancy continuously through lattice sites before one-layer climb', () => {
     expect(vacancyPosition(0)?.position[0]).toBeCloseTo(-2 * cubicSpacing);
@@ -26,6 +36,15 @@ describe('edge and screw displacement geometry', () => {
       const before = vacancyPosition((step - 1) / 1000)!;
       const after = vacancyPosition(step / 1000)!;
       expect(Math.hypot(...before.position.map((value, axis) => value - after.position[axis]))).toBeLessThan(.025);
+    }
+  });
+  it('keeps glide strain until the core exits and matches the static edge before climb begins', () => {
+    expect(edgeGlideExitProgress).toBeGreaterThan(.93);
+    expect(edgeGlideExitProgress).toBeLessThan(.94);
+    expect(3 * cubicSpacing - cubicAtomPosition('edge-glide', .9, 3, 1, 0)[0]).toBeGreaterThan(.02);
+    for (let k = -2; k <= 2; k++) for (let j = -2; j <= 2; j++) for (let i = -3; i <= 3; i++) {
+      if (i === -2 && j === 1 && k === 0) continue; // Initial vacancy has no visible atom.
+      expect(cubicAtomPosition('edge-climb', 0, i, j, k)).toEqual(cubicAtomPosition('edge', 0, i, j, k));
     }
   });
   it('uses an angular screw displacement and a continuous cross-slip core path', () => {
@@ -179,6 +198,12 @@ describe('intersection and double cross-slip sequence', () => {
     expect(detached.loopOpacity).toBeLessThan(.001);
     expect(doubleCrossSlipState(1).connectedArc).toBeNull();
     expect(doubleCrossSlipState(1).loopRadiusX).toBeGreaterThan(detached.loopRadiusX!);
+    const final = doubleCrossSlipState(1);
+    expect(final.loopCenter[0] - final.loopRadiusX!).toBeLessThan(final.line[3][0]);
+    expect(final.loopCenter[0] + final.loopRadiusX!).toBeGreaterThan(final.line[6][0]);
+    expect(Math.abs(final.loopCenter[0]) + final.loopRadiusX!).toBeLessThan(2.25);
+    expect(final.loopRadiusZ!).toBeLessThan(2.25);
+    expect(final.loopRadiusX! * final.loopRadiusZ!).toBeGreaterThan(4 * detached.loopRadiusX! * detached.loopRadiusZ!);
   });
   it('keeps the candidate source segments on the fixed A, B, or parallel C planes', () => {
     const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;

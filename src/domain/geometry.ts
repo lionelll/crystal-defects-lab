@@ -37,8 +37,9 @@ function lerp(a: Vec3, b: Vec3, t: number): Vec3 { return [a[0] + (b[0] - a[0]) 
 
 export interface FrankReadState {
   source: Vec3[];
-  loops: { center: Vec3; radiusX: number; radiusY: number; opacity: number }[];
+  loops: { center: Vec3; radiusX: number; radiusY: number; opacity: number; points: Vec3[] }[];
   inContact: boolean;
+  contactOpacity: number;
   generation: number;
   emittedLoopCount: number;
 }
@@ -60,29 +61,60 @@ export function frankReadState(progress: number): FrankReadState {
   const generation = cycles * 2 + (p < .55 ? 1 : 2);
   const bow = range(phase, 0, .48);
   const fold = range(phase, .48, .7);
-  const loopShape: Vec3[] = [[-2, 0, 0], [-2.18, .35, 0], [-2.35, 1.25, 0], [-1.35, 2.12, 0], [0, 2.55, 0], [1.35, 2.12, 0], [2.35, 1.25, 0], [0, -.75, 0], [2, 0, 0]];
-  const source = loopShape.map((target, i) => {
+  const gap = .2 * (1 - range(phase, .65, .7));
+  const loopShape: Vec3[] = [
+    [-2, 0, 0], [-1.15, -.48, 0], [-gap, -1.0, 0], [-2.4, -1.15, 0], [-2.5, .8, 0], [-1.35, 2.12, 0], [0, 2.55, 0],
+    [1.35, 2.12, 0], [2.5, .8, 0], [2.4, -1.15, 0], [gap, -1.0, 0], [1.15, -.48, 0], [2, 0, 0],
+  ];
+  const beforeSeparation = loopShape.map((target, i) => {
     const u = i / (loopShape.length - 1);
     const straight: Vec3 = [-2 + 4 * u, 0, 0];
-    if (phase < .7) return lerp([straight[0], Math.sin(Math.PI * u) * 1.95 * bow, 0], target, fold);
-    return lerp(target, straight, range(phase, .7, .94));
+    const arched: Vec3 = [straight[0], Math.sin(Math.PI * u) * 1.95 * bow, 0];
+    if (phase <= .48) return arched;
+    // Lift the outer arc before it moves around the pin tails. This keeps
+    // the single source line embedded until the instant of reconnection.
+    const lifted: Vec3 = [arched[0], arched[1] + (i >= 3 && i <= 9 ? .75 : 0), 0];
+    const spread: Vec3 = [i >= 3 && i <= 9 ? target[0] : lifted[0], lifted[1], 0];
+    const inner: Vec3 = [i === 1 || i === 2 || i === 10 || i === 11 ? target[0] : spread[0], i === 1 || i === 2 || i === 10 || i === 11 ? target[1] : spread[1], 0];
+    const t = fold;
+    if (t < .2) return lerp(arched, lifted, smooth(t / .2));
+    if (t < .5) return lerp(lifted, spread, smooth((t - .2) / .3));
+    if (t < .75) return lerp(spread, inner, smooth((t - .5) / .25));
+    return lerp(inner, target, smooth((t - .75) / .25));
   });
-  source[0] = [-2, 0, 0];
-  source[source.length - 1] = [2, 0, 0];
+  beforeSeparation[0] = [-2, 0, 0];
+  beforeSeparation[beforeSeparation.length - 1] = [2, 0, 0];
+  const separationAt = p < .55 ? .385 : .865;
+  const separatedAge = p - separationAt;
+  const neck: Vec3[] = [loopShape[0], loopShape[1], [0, -1, 0], loopShape[11], loopShape[12]];
+  const source = separatedAge >= 0
+    ? neck.map(point => lerp(point, [point[0], 0, 0], range(separatedAge, 0, .04)))
+    : beforeSeparation;
   const loops: FrankReadState['loops'] = [];
   for (let cycle = Math.max(0, cycles - 2); cycle <= cycles; cycle++) {
     for (const [index, offset] of [.385, .865].entries()) {
       const age = elapsed - cycle - offset;
       if (age < 0 || age > 2.3) continue;
       const separation = range(age, 0, .16);
-      const opacity = range(age, 0, .10) * (1 - range(age, 1.8, 2.3));
+      const opacity = 1 - range(age, 1.8, 2.3);
+      const center: Vec3 = [0, .75 + (index === 0 ? .03 : .05) * separation, 0];
+      const radiusX = 2.45 + .16 * separation + .25 * Math.max(0, age - .16);
+      const radiusY = 1.8 + .12 * separation + .2 * Math.max(0, age - .16);
+      const joinedContour: Vec3[] = [[0, -1, 0], [-2.4, -1.15, 0], [-2.5, .8, 0], [-1.35, 2.12, 0], [0, 2.55, 0], [1.35, 2.12, 0], [2.5, .8, 0], [2.4, -1.15, 0], [0, -1, 0]];
+      const points = joinedContour.map((point, pointIndex): Vec3 => {
+        const angle = -Math.PI / 2 - pointIndex * Math.PI / 4;
+        const ellipse: Vec3 = [center[0] + radiusX * Math.cos(angle), center[1] + radiusY * Math.sin(angle), 0];
+        return lerp(point, ellipse, range(age, 0, .04));
+      });
       loops.push({
-        center: [0, .75 + (index === 0 ? .03 : .05) * separation, 0],
-        radiusX: 2.45 + .16 * separation + .25 * Math.max(0, age - .16),
-        radiusY: 1.8 + .12 * separation + .2 * Math.max(0, age - .16),
+        center,
+        radiusX,
+        radiusY,
         opacity,
+        points,
       });
     }
   }
-  return { source, loops, inContact: phase >= .64 && phase < .7, generation, emittedLoopCount: frankReadLoopCount(elapsed) };
+  const contactOpacity = phase < .7 ? range(phase, .66, .7) : 0;
+  return { source, loops, inContact: phase >= .68 && phase < .7, contactOpacity, generation, emittedLoopCount: frankReadLoopCount(elapsed) };
 }

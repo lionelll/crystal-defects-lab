@@ -4,6 +4,9 @@ import { add, intersectionConfig, scale, type IntersectionId, type Vec3 } from '
 export const edgeCoreOffset = .38;
 export const cubicSpacing = .75;
 export const edgeBurgers = cubicSpacing;
+export const edgeGlideStartX = -2.1;
+export const edgeGlideEndX = 2.55;
+export const edgeGlideExitProgress = (3 * cubicSpacing - edgeGlideStartX) / (edgeGlideEndX - edgeGlideStartX);
 export const screwPitch = cubicSpacing;
 export const screwBaseY = -.3;
 export const secondCrossSlipPlaneX = 1.25;
@@ -26,7 +29,7 @@ export function smoothRange(progress: number, start: number, end: number) {
 export function edgeState(id: SceneId, progress: number) {
   const p = clamp(progress);
   return {
-    x: id === 'edge-glide' ? -2.1 + 4.65 * p : edgeCoreOffset,
+    x: id === 'edge-glide' ? edgeGlideStartX + (edgeGlideEndX - edgeGlideStartX) * p : edgeCoreOffset,
     y: id === 'edge-climb' ? cubicSpacing * smoothRange(p, .66, 1) : 0,
   };
 }
@@ -65,11 +68,14 @@ export function cubicAtomPosition(id: SceneId, progress: number, i: number, j: n
   let z = k * .75;
   if (id === 'edge' || id === 'edge-glide' || id === 'edge-climb') {
     const core = edgeState(id, p);
-    const above = id === 'edge-climb' ? smoothRange(y - core.y, -.3, .3) : Number(y > core.y + .1);
-    const elastic = id === 'edge-glide' ? 1 - smoothRange(p, .8, 1) : 1;
+    const discreteAbove = Number(y > core.y + .1);
+    const above = id === 'edge-climb'
+      ? discreteAbove + (smoothRange(y - core.y, -.3, .3) - discreteAbove) * smoothRange(p, 0, .1)
+      : discreteAbove;
+    const elastic = id === 'edge-glide' ? 1 - smoothRange(p, edgeGlideExitProgress, 1) : 1;
     x -= .12 * above * Math.tanh((x - core.x) * 1.4) * elastic;
-    if (id === 'edge-glide' && y < core.y) x += edgeBurgers * smoothRange(core.x - x, -.28, .28);
-    y += (.06 * above - .025 * (1 - above)) * Math.exp(-Math.abs(x - core.x));
+    if (id === 'edge-glide' && y < core.y) x -= edgeBurgers * smoothRange(core.x - x, -.28, .28);
+    y += (.06 * above - .025 * (1 - above)) * Math.exp(-Math.abs(x - core.x)) * elastic;
     if (id === 'edge-climb' && j === 1 && k === 0) {
       if (i === -1) x -= cubicSpacing * smoothRange(p, .1, .3);
       if (i === 0) x -= cubicSpacing * smoothRange(p, .3, .5);
@@ -177,9 +183,9 @@ export function doubleCrossSlipState(progress: number) {
     line,
     connectedArc,
     connectedArcOpacity,
-    loopRadiusX: progress > .86 ? 1.075 + .3 * detached : null,
-    loopRadiusZ: progress > .86 ? .6 + .2 * detached : null,
+    loopRadiusX: progress > .86 ? 1.075 + .675 * detached : null,
+    loopRadiusZ: progress > .86 ? .6 + 1.0 * detached : null,
     loopOpacity: smoothRange(progress, .86, .92),
-    loopCenter: [-.275 + .4 * detached, doubleCrossSlipParallelPlaneY, 0] as Vec3,
+    loopCenter: [-.275 + .275 * detached, doubleCrossSlipParallelPlaneY, 0] as Vec3,
   };
 }
