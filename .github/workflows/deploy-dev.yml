@@ -1,0 +1,165 @@
+name: Deploy dev to defects test
+
+on:
+  push:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crystal-defects-lab-dev
+  cancel-in-progress: false
+
+jobs:
+  build-deploy:
+    if: github.ref == 'refs/heads/dev' && vars.DEFECTS_TEST_READY == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DEPLOY_ROOT: /var/www/defects-dev
+      TEST_ORIGIN: http://123.57.11.145:8080
+
+    steps:
+      - name: Check out exact dev commit
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Test and typecheck
+        run: |
+          npm test
+          npx tsc --noEmit
+
+      - name: Build /defects/ assets
+        run: |
+          npm run build
+          grep -F '/defects/logo.png' dist/index.html
+          grep -F '/defects/assets/' dist/index.html
+
+      - name: Write test version and file hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          prepared_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          printf '{"version":"dev","commit":"%s","environment":"test","basePath":"/defects/","preparedAt":"%s"}\n' \
+            "$GITHUB_SHA" "$prepared_at" > dist/release.json
+          (cd dist && find . -type f ! -name files.sha256 -print0 | sort -z | xargs -0 sha256sum > files.sha256)
+
+      - name: Confirm public path does not fall back to the portal
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl --silent --show-error --max-time 10 "$TEST_ORIGIN/defects/release.json" || true)"
+          if grep -Fq '材料科学可视化工具集' <<< "$response"; then
+            echo 'The /defects/ mapping still falls back to the portal; deployment stopped.' >&2
+            exit 1
+          fi
+
+      - name: Configure isolated pinned SSH access
+        shell: bash
+        env:
+          DEFECTS_DEPLOY_USER: ${{ secrets.DEFECTS_DEPLOY_USER }}
+          DEFECTS_DEPLOY_KEY: ${{ secrets.DEFECTS_DEPLOY_KEY }}
+          DEFECTS_KNOWN_HOSTS: ${{ secrets.DEFECTS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$DEFECTS_DEPLOY_USER"
+          test -n "$DEFECTS_DEPLOY_KEY"
+          test -n "$DEFECTS_KNOWN_HOSTS"
+          [[ "$DEFECTS_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          test "$DEFECTS_DEPLOY_USER" != root
+          install -m 700 -d "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$DEFECTS_DEPLOY_KEY" > "$HOME/.ssh/defects_ed25519"
+          printf '%s\n' "$DEFECTS_KNOWN_HOSTS" > "$HOME/.ssh/defects_known_hosts"
+          ssh-keygen -F 123.57.11.145 -f "$HOME/.ssh/defects_known_hosts" \
+            | grep -Fq 'ssh-ed25519 '
+          cat > "$HOME/.ssh/defects_config" <<EOF
+          Host defects-test
+            HostName 123.57.11.145
+            Port 22
+            User $DEFECTS_DEPLOY_USER
+            IdentityFile $HOME/.ssh/defects_ed25519
+            UserKnownHostsFile $HOME/.ssh/defects_known_hosts
+            StrictHostKeyChecking yes
+            IdentitiesOnly yes
+            BatchMode yes
+          EOF
+          chmod 600 "$HOME/.ssh/defects_ed25519" "$HOME/.ssh/defects_known_hosts" "$HOME/.ssh/defects_config"
+
+      - name: Check project-only remote directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -F "$HOME/.ssh/defects_config" defects-test \
+            "set -eu; test -d '$DEPLOY_ROOT'; test \"\$(realpath -e '$DEPLOY_ROOT')\" = '$DEPLOY_ROOT'; test -w '$DEPLOY_ROOT'; test -d '$DEPLOY_ROOT/releases'; test -w '$DEPLOY_ROOT/releases'; test ! -e '$DEPLOY_ROOT/releases/$GITHUB_SHA'; test ! -L '$DEPLOY_ROOT/releases/$GITHUB_SHA'; test ! -e '$DEPLOY_ROOT/current.next'; test ! -L '$DEPLOY_ROOT/current.next'; test ! -e '$DEPLOY_ROOT/current.rollback'; test ! -L '$DEPLOY_ROOT/current.rollback'"
+
+      - name: Upload and verify immutable release
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="$DEPLOY_ROOT/releases/$GITHUB_SHA"
+          ssh -F "$HOME/.ssh/defects_config" defects-test "mkdir '$release_dir'"
+          rsync -az --delete -e "ssh -F $HOME/.ssh/defects_config" \
+            dist/ "defects-test:$release_dir/"
+          ssh -F "$HOME/.ssh/defects_config" defects-test \
+            "cd '$release_dir' && sha256sum -c files.sha256"
+
+      - name: Activate, verify publicly, and roll back on failure
+        shell: bash
+        run: |
+          set -euo pipefail
+          previous="$(ssh -F "$HOME/.ssh/defects_config" defects-test \
+            "readlink '$DEPLOY_ROOT/current' || true")"
+          if [[ -n "$previous" && ! "$previous" =~ ^releases/[0-9a-f]{40}$ ]]; then
+            echo 'Current version pointer is outside the expected project release format.' >&2
+            exit 1
+          fi
+          remote_head="$(git ls-remote origin refs/heads/dev | cut -f1)"
+          test "$remote_head" = "$GITHUB_SHA"
+
+          rollback_current() {
+            if [[ -n "$previous" ]]; then
+              ssh -F "$HOME/.ssh/defects_config" defects-test \
+                "set -eu; cd '$DEPLOY_ROOT'; if test -L current; then ln -s '$previous' current.rollback; mv -Tf current.rollback current; fi"
+            else
+              ssh -F "$HOME/.ssh/defects_config" defects-test \
+                "set -eu; cd '$DEPLOY_ROOT'; if test -L current && test \"\$(readlink current)\" = 'releases/$GITHUB_SHA'; then unlink current; fi"
+            fi
+          }
+          if ! ssh -F "$HOME/.ssh/defects_config" defects-test \
+            "set -eu; cd '$DEPLOY_ROOT'; ln -s 'releases/$GITHUB_SHA' current.next; mv -Tf current.next current; test \"\$(readlink current)\" = 'releases/$GITHUB_SHA'"; then
+            rollback_current
+            exit 1
+          fi
+
+          verify_public() {
+            curl --fail --silent --show-error --retry 3 --retry-delay 2 \
+              "$TEST_ORIGIN/defects/release.json" | grep -F "\"commit\":\"$GITHUB_SHA\"" || return 1
+            curl --fail --silent --show-error "$TEST_ORIGIN/defects/" \
+              | grep -F '位错 3D 动态交互实验室' || return 1
+            curl --fail --silent --show-error "$TEST_ORIGIN/defects/scene/edge-glide" \
+              | grep -F '位错 3D 动态交互实验室' || return 1
+            curl --fail --silent --show-error --head "$TEST_ORIGIN/defects/logo.png" \
+              | grep -qi 'content-type: image/png' || return 1
+            for asset in dist/assets/*; do
+              curl --fail --silent --show-error --output /dev/null \
+                "$TEST_ORIGIN/defects/assets/${asset##*/}" || return 1
+            done
+          }
+          deployed_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          if ! verify_public || ! ssh -F "$HOME/.ssh/defects_config" defects-test \
+            "printf '%s %s\\n' '$deployed_at' '$GITHUB_SHA' >> '$DEPLOY_ROOT/deployments.log'"; then
+            rollback_current
+            echo 'Public verification failed; this project current pointer was restored.' >&2
+            exit 1
+          fi
+          printf 'Deployed %s at %s to %s/defects/\n' "$GITHUB_SHA" "$deployed_at" "$TEST_ORIGIN" >> "$GITHUB_STEP_SUMMARY"
