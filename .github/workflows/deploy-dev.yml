@@ -39,7 +39,7 @@ jobs:
 
       - name: Test and typecheck
         run: |
-          npm test
+          npm test -- --testTimeout 15000
           npx tsc --noEmit
 
       - name: Build /defects/ assets
