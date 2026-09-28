@@ -3,22 +3,26 @@ name: Deploy dev to defects test
 on:
   push:
     branches: [dev]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
   group: crystal-defects-lab-dev
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-deploy:
-    if: github.ref == 'refs/heads/dev' && vars.DEFECTS_TEST_READY == 'true'
+    if: github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       DEPLOY_ROOT: /var/www/defects-dev
       TEST_ORIGIN: http://123.57.11.145:8080
+      DEV_SSH_HOST: ${{ secrets.DEV_SSH_HOST }}
+      DEV_SSH_PORT: ${{ secrets.DEV_SSH_PORT }}
+      DEV_SSH_USER: ${{ secrets.DEV_SSH_USER }}
 
     steps:
       - name: Check out exact dev commit
@@ -48,9 +52,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          prepared_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          printf '{"version":"dev","commit":"%s","environment":"test","basePath":"/defects/","preparedAt":"%s"}\n' \
-            "$GITHUB_SHA" "$prepared_at" > dist/release.json
+          deployed_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          printf '{"version":"dev","commit":"%s","environment":"test","basePath":"/defects/","deployedAt":"%s"}\n' \
+            "$GITHUB_SHA" "$deployed_at" > dist/release.json
           (cd dist && find . -type f ! -name files.sha256 -print0 | sort -z | xargs -0 sha256sum > files.sha256)
 
       - name: Confirm public path does not fall back to the portal
@@ -66,32 +70,33 @@ jobs:
       - name: Configure isolated pinned SSH access
         shell: bash
         env:
-          DEFECTS_DEPLOY_USER: ${{ secrets.DEFECTS_DEPLOY_USER }}
-          DEFECTS_DEPLOY_KEY: ${{ secrets.DEFECTS_DEPLOY_KEY }}
-          DEFECTS_KNOWN_HOSTS: ${{ secrets.DEFECTS_KNOWN_HOSTS }}
+          DEV_SSH_PRIVATE_KEY: ${{ secrets.DEV_SSH_PRIVATE_KEY }}
+          DEV_SSH_KNOWN_HOSTS: ${{ secrets.DEV_SSH_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
-          test -n "$DEFECTS_DEPLOY_USER"
-          test -n "$DEFECTS_DEPLOY_KEY"
-          test -n "$DEFECTS_KNOWN_HOSTS"
-          [[ "$DEFECTS_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
-          test "$DEFECTS_DEPLOY_USER" != root
+          test "$DEV_SSH_HOST" = 123.57.11.145
+          test "$DEV_SSH_PORT" = 22
+          test "$DEV_SSH_USER" = defects-deploy
+          test -n "$DEV_SSH_PRIVATE_KEY"
+          test -n "$DEV_SSH_KNOWN_HOSTS"
           install -m 700 -d "$HOME/.ssh"
           umask 077
-          printf '%s\n' "$DEFECTS_DEPLOY_KEY" > "$HOME/.ssh/defects_ed25519"
-          printf '%s\n' "$DEFECTS_KNOWN_HOSTS" > "$HOME/.ssh/defects_known_hosts"
-          ssh-keygen -F 123.57.11.145 -f "$HOME/.ssh/defects_known_hosts" \
+          printf '%s\n' "$DEV_SSH_PRIVATE_KEY" > "$HOME/.ssh/defects_ed25519"
+          printf '%s\n' "$DEV_SSH_KNOWN_HOSTS" > "$HOME/.ssh/defects_known_hosts"
+          ssh-keygen -F "$DEV_SSH_HOST" -f "$HOME/.ssh/defects_known_hosts" \
             | grep -Fq 'ssh-ed25519 '
           cat > "$HOME/.ssh/defects_config" <<EOF
           Host defects-test
-            HostName 123.57.11.145
-            Port 22
-            User $DEFECTS_DEPLOY_USER
+            HostName $DEV_SSH_HOST
+            Port $DEV_SSH_PORT
+            User $DEV_SSH_USER
             IdentityFile $HOME/.ssh/defects_ed25519
             UserKnownHostsFile $HOME/.ssh/defects_known_hosts
+            HostKeyAlgorithms ssh-ed25519
             StrictHostKeyChecking yes
             IdentitiesOnly yes
             BatchMode yes
+            ForwardAgent no
           EOF
           chmod 600 "$HOME/.ssh/defects_ed25519" "$HOME/.ssh/defects_known_hosts" "$HOME/.ssh/defects_config"
 
@@ -99,51 +104,70 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]]
+          next_link="current.next.$GITHUB_RUN_ID.$GITHUB_RUN_ATTEMPT"
           ssh -F "$HOME/.ssh/defects_config" defects-test \
-            "set -eu; test -d '$DEPLOY_ROOT'; test \"\$(realpath -e '$DEPLOY_ROOT')\" = '$DEPLOY_ROOT'; test -w '$DEPLOY_ROOT'; test -d '$DEPLOY_ROOT/releases'; test -w '$DEPLOY_ROOT/releases'; test ! -e '$DEPLOY_ROOT/releases/$GITHUB_SHA'; test ! -L '$DEPLOY_ROOT/releases/$GITHUB_SHA'; test ! -e '$DEPLOY_ROOT/current.next'; test ! -L '$DEPLOY_ROOT/current.next'; test ! -e '$DEPLOY_ROOT/current.rollback'; test ! -L '$DEPLOY_ROOT/current.rollback'"
+            "set -eu; test -d '$DEPLOY_ROOT'; test \"\$(realpath -e '$DEPLOY_ROOT')\" = '$DEPLOY_ROOT'; test -w '$DEPLOY_ROOT'; test -d '$DEPLOY_ROOT/releases'; test -w '$DEPLOY_ROOT/releases'; test ! -e '$DEPLOY_ROOT/$next_link'; test ! -L '$DEPLOY_ROOT/$next_link'"
 
       - name: Upload and verify immutable release
         shell: bash
         run: |
           set -euo pipefail
           release_dir="$DEPLOY_ROOT/releases/$GITHUB_SHA"
-          ssh -F "$HOME/.ssh/defects_config" defects-test "mkdir '$release_dir'"
-          rsync -az --delete -e "ssh -F $HOME/.ssh/defects_config" \
-            dist/ "defects-test:$release_dir/"
+          release_state="$(ssh -F "$HOME/.ssh/defects_config" defects-test \
+            "set -eu; if test -L '$release_dir'; then exit 1; elif test -d '$release_dir'; then printf existing; elif test -e '$release_dir'; then exit 1; else printf new; fi")"
+          if [[ "$release_state" == new ]]; then
+            ssh -F "$HOME/.ssh/defects_config" defects-test "mkdir '$release_dir'"
+            rsync -az -e "ssh -F $HOME/.ssh/defects_config" \
+              dist/ "defects-test:$release_dir/"
+          else
+            test "$release_state" = existing
+          fi
           ssh -F "$HOME/.ssh/defects_config" defects-test \
             "cd '$release_dir' && sha256sum -c files.sha256"
+          remote_release="$(ssh -F "$HOME/.ssh/defects_config" defects-test \
+            "cat '$release_dir/release.json'")"
+          printf '%s' "$remote_release" | python3 -c \
+            'import json,sys; d=json.load(sys.stdin); assert d["commit"] == sys.argv[1] and d["version"] == "dev" and d["environment"] == "test" and d["basePath"] == "/defects/"' \
+            "$GITHUB_SHA"
+          if [[ "$release_state" == existing ]]; then
+            local_static="$(cd dist && find . -type f ! -name release.json ! -name files.sha256 -print0 | sort -z | xargs -0 sha256sum)"
+            remote_static="$(ssh -F "$HOME/.ssh/defects_config" defects-test \
+              "cd '$release_dir' && find . -type f ! -name release.json ! -name files.sha256 -print0 | sort -z | xargs -0 sha256sum")"
+            test "$local_static" = "$remote_static"
+          fi
 
-      - name: Activate, verify publicly, and roll back on failure
+      - name: Activate and verify without automatic rollback
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]]
+          next_link="current.next.$GITHUB_RUN_ID.$GITHUB_RUN_ATTEMPT"
           previous="$(ssh -F "$HOME/.ssh/defects_config" defects-test \
-            "readlink '$DEPLOY_ROOT/current' || true")"
+            "set -eu; if test -L '$DEPLOY_ROOT/current'; then readlink '$DEPLOY_ROOT/current'; elif test -e '$DEPLOY_ROOT/current'; then exit 1; fi")"
           if [[ -n "$previous" && ! "$previous" =~ ^releases/[0-9a-f]{40}$ ]]; then
             echo 'Current version pointer is outside the expected project release format.' >&2
             exit 1
           fi
+          printf 'Previous current: %s\n' "${previous:-none}" >> "$GITHUB_STEP_SUMMARY"
           remote_head="$(git ls-remote origin refs/heads/dev | cut -f1)"
           test "$remote_head" = "$GITHUB_SHA"
 
-          rollback_current() {
-            if [[ -n "$previous" ]]; then
-              ssh -F "$HOME/.ssh/defects_config" defects-test \
-                "set -eu; cd '$DEPLOY_ROOT'; if test -L current; then ln -s '$previous' current.rollback; mv -Tf current.rollback current; fi"
-            else
-              ssh -F "$HOME/.ssh/defects_config" defects-test \
-                "set -eu; cd '$DEPLOY_ROOT'; if test -L current && test \"\$(readlink current)\" = 'releases/$GITHUB_SHA'; then unlink current; fi"
-            fi
-          }
           if ! ssh -F "$HOME/.ssh/defects_config" defects-test \
-            "set -eu; cd '$DEPLOY_ROOT'; ln -s 'releases/$GITHUB_SHA' current.next; mv -Tf current.next current; test \"\$(readlink current)\" = 'releases/$GITHUB_SHA'"; then
-            rollback_current
+            "set -eu; cd '$DEPLOY_ROOT'; ln -s 'releases/$GITHUB_SHA' '$next_link'; mv -Tf '$next_link' current; test \"\$(readlink current)\" = 'releases/$GITHUB_SHA'"; then
+            observed="$(ssh -F "$HOME/.ssh/defects_config" defects-test \
+              "readlink '$DEPLOY_ROOT/current' || true" || true)"
+            echo "::error::Activation failed; current=${observed:-unknown}. No automatic rollback."
             exit 1
           fi
 
           verify_public() {
             curl --fail --silent --show-error --retry 3 --retry-delay 2 \
-              "$TEST_ORIGIN/defects/release.json" | grep -F "\"commit\":\"$GITHUB_SHA\"" || return 1
+              "$TEST_ORIGIN/defects/release.json" | python3 -c \
+              'import json,sys; d=json.load(sys.stdin); assert d["commit"] == sys.argv[1] and d["version"] == "dev" and d["environment"] == "test" and d["basePath"] == "/defects/"' \
+              "$GITHUB_SHA" || return 1
             curl --fail --silent --show-error "$TEST_ORIGIN/defects/" \
               | grep -F '位错 3D 动态交互实验室' || return 1
             curl --fail --silent --show-error "$TEST_ORIGIN/defects/scene/edge-glide" \
@@ -155,11 +179,16 @@ jobs:
                 "$TEST_ORIGIN/defects/assets/${asset##*/}" || return 1
             done
           }
-          deployed_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          if ! verify_public || ! ssh -F "$HOME/.ssh/defects_config" defects-test \
-            "printf '%s %s\\n' '$deployed_at' '$GITHUB_SHA' >> '$DEPLOY_ROOT/deployments.log'"; then
-            rollback_current
-            echo 'Public verification failed; this project current pointer was restored.' >&2
+          if ! verify_public; then
+            observed="$(ssh -F "$HOME/.ssh/defects_config" defects-test \
+              "readlink '$DEPLOY_ROOT/current' || true" || true)"
+            echo "::error::Public verification failed; current=${observed:-unknown}. Manual recovery requires authorization."
             exit 1
           fi
-          printf 'Deployed %s at %s to %s/defects/\n' "$GITHUB_SHA" "$deployed_at" "$TEST_ORIGIN" >> "$GITHUB_STEP_SUMMARY"
+          switched_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          if ! ssh -F "$HOME/.ssh/defects_config" defects-test \
+            "printf '%s %s %s\\n' '$switched_at' '${previous:-none}' '$GITHUB_SHA' >> '$DEPLOY_ROOT/deployments.log'"; then
+            echo "::error::Project log write failed after switch; current may be $GITHUB_SHA. No automatic rollback."
+            exit 1
+          fi
+          printf 'Deployed %s at %s to %s/defects/\n' "$GITHUB_SHA" "$switched_at" "$TEST_ORIGIN" >> "$GITHUB_STEP_SUMMARY"
