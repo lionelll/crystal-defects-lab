@@ -25,7 +25,7 @@ npm run preview -- --port 4174
 
 `preview` 对应 `http://127.0.0.1:4174/defects/`。生产静态文件生成在本仓库 `dist/`。测试地址为 `http://123.57.11.145:8080/defects/`，唯一测试部署根为 `/var/www/defects-dev`；当前公网版本可通过 `/defects/release.json` 查询。
 
-本项目已有 `dev` 测试自动部署工作流，说明见 [DEVELOPMENT.md](DEVELOPMENT.md)。按公共新规范的工作流调整目前**仅在本地**，尚未提交、推送或部署；现有测试站仍运行 `7d75ce6b01f2b15334e93442da9ce11d63617aa4`。下次推送前须按文档迁移本仓库独立的 Actions Secrets，并取得该次推送和测试部署授权。
+本项目已有从 `dev` 推送触发的测试自动部署工作流，说明见 [DEVELOPMENT.md](DEVELOPMENT.md)。当前测试版本以公网 [`release.json`](http://123.57.11.145:8080/defects/release.json) 的完整提交为准，并与 Actions 运行和服务器 `current` 核对；每次推送前须取得对应测试部署授权。
 
 ## 页面范围
 

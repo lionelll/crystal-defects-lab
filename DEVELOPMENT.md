@@ -32,14 +32,14 @@ npm run dev -- --port 4173
 
 ## 测试环境职责与门禁
 
-- 测试地址：`http://123.57.11.145:8080/defects/`；唯一测试部署根：`/var/www/defects-dev`。首次映射与独立受限账号 `defects-deploy` 已于 2026-09-28 验收；当日自动部署的精确 `dev` 提交为 `7d75ce6b01f2b15334e93442da9ce11d63617aa4`。
+- 测试地址：`http://123.57.11.145:8080/defects/`；唯一测试部署根：`/var/www/defects-dev`。首次映射与独立受限账号 `defects-deploy` 已于 2026-09-28 验收；当前版本以公网 `/defects/release.json`、Actions 运行及服务器 `current` 三者一致为准。
 - 本项目负责人在用户对当次精确 `dev` 提交、地址和目录明确授权后，负责本项目测试版本的安装、验证与获准的本项目手动回滚。测试包须与远端 `dev` 一致，带 `environment=test`、40 位提交号、`deployedAt` 的版本文件及全文件 SHA-256；只维护本项目 `releases/`、`current`、项目日志和回滚点。
 - 测试 SSH 使用本仓库独立密钥与已核验的测试机主机键，不使用聊天密码、其他项目密钥或 `10-部署发布` 的高权限测试私钥。首次接入的公共 Nginx 例外已用毕；后续公共 Nginx、系统权限或映射变更由用户或云平台管理员按当次授权处理。正式服务器发布和回滚交 `10-部署发布`。
 
 ## dev 测试自动部署
 
-本仓库 `.github/workflows/deploy-dev.yml` 已在 2026-09-28 从 `dev` 推送成功自动部署。按公共新规范的本地修订版监听 `dev` 推送并声明 `workflow_dispatch`，仅允许 `dev` 精确提交进入测试站；手动按钮是否可用取决于 GitHub 对工作流文件所在分支的要求，不能仅凭 YAML 声称可手动运行。流水线保留锁文件安装、测试、类型检查、`/defects/` 构建、逐文件 SHA-256、不可变 `releases/<完整提交号>/`、原子切换 `current` 与公网核验。重新运行同一提交时，只在已存在版本的文件校验与静态产物比对均通过后复用，不覆盖其内容。它不修改公共 Nginx、其他项目或正式服务器。
+本仓库 `.github/workflows/deploy-dev.yml` 已在 2026-09-28 从 `dev` 推送成功自动部署。工作流监听 `dev` 推送并声明 `workflow_dispatch`，仅允许 `dev` 精确提交进入测试站；手动按钮是否可用取决于 GitHub 对工作流文件所在分支的要求，不能仅凭 YAML 声称可手动运行。流水线保留锁文件安装、测试、类型检查、`/defects/` 构建、逐文件 SHA-256、不可变 `releases/<完整提交号>/`、原子切换 `current` 与公网核验。重新运行同一提交时，只在已存在版本的文件校验与静态产物比对均通过后复用，不覆盖其内容。它不修改公共 Nginx、其他项目或正式服务器。
 
-新工作流不再依赖长期的 `DEFECTS_TEST_READY` 变量，统一读取本仓库专用 Secrets `DEV_SSH_HOST`、`DEV_SSH_PORT`、`DEV_SSH_USER`、`DEV_SSH_PRIVATE_KEY`、`DEV_SSH_KNOWN_HOSTS`，并在运行时核对固定测试机、22 端口和非 root 的 `defects-deploy` 用户。**这些新名称尚未在 GitHub 仓库配置**；现有 `DEFECTS_*` Secrets 和变量保持原状，本轮本地修改未触发 CI。将新工作流提交或推送前，必须另获 Git 与 Secrets 变更授权并完成本仓库凭据迁移，否则下一次 `dev` 推送会失败。
+工作流不依赖长期的 `DEFECTS_TEST_READY` 变量，读取本仓库专用 Secrets `DEV_SSH_HOST`、`DEV_SSH_PORT`、`DEV_SSH_USER`、`DEV_SSH_PRIVATE_KEY`、`DEV_SSH_KNOWN_HOSTS`，并在运行时核对固定测试机、22 端口和非 root 的 `defects-deploy` 用户。这五项已按用户授权配置于本仓库；旧 `DEFECTS_*` Secrets 和变量暂保留但不再使用。后续任何 `dev` 推送仍须说明将触发测试部署并取得当次授权。
 
 按用户选择，失败时流水线报错、保留失败版本和证据，**不自动回滚 `current`**。若切换后公网验收失败，异常版本可能继续在线；负责人须核对服务器实际指向并报告，获得当次回滚授权后才手动恢复。并发运行按项目隔离且新运行可取消旧运行；临时链接使用运行 ID 与尝试次数命名，取消时仍须核对实际 `current`，不推定旧版本已恢复。`release.json` 的 `deployedAt` 是工作流生成的 UTC 时间，实际切换时间以 Actions 与项目日志为准。测试上线不代表科学内容、WebGL 交互或目标设备性能已获验收。
